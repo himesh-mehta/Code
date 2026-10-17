@@ -1,0 +1,24 @@
+# Environment variables and secrets
+.env
+.env.local
+.env*.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# Local scratch and tooling dumps
+stitch_dump.ps1
+stitch_export/
+
+# Node & dependencies
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log

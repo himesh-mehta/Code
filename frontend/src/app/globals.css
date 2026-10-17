@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-primary: #0067A5;
+    --color-primary-hover: #005588;
+    --color-secondary: #008FD3;
+    --color-primary-light: #DCEFF7;
+    --color-background: #FFFFFF;
+    --color-background-secondary: #F5F7F9;
+    --color-text-primary: #252525;
+    --color-text-secondary: #666666;
+    --color-border: #E5E7EB;
+    --color-border-subtle: #EAEEF2;
+
+    /* Semantic Colors */
+    --color-positive: #16A34A;
+    --color-positive-soft: #DCFCE7;
+    --color-neutral: #64748B;
+    --color-neutral-soft: #F1F5F9;
+    --color-negative: #DC2626;
+    --color-negative-soft: #FEE2E2;
+    --color-warning: #D97706;
+    --color-warning-soft: #FEF3C7;
+
+    /* Design System Token Mappings */
+    --background: #FFFFFF;
+    --foreground: #252525;
+    --surface: #F5F7F9;
+    --surface-lowest: #FFFFFF;
+    --surface-low: #DCEFF7;
+    --surface-container: #F5F7F9;
+    --surface-high: #EBF4F9;
+    --on-surface: #252525;
+    --on-surface-variant: #666666;
+    --outline: #9CA3AF;
+    --outline-variant: #E5E7EB;
+    
+    --primary: #0067A5;
+    --primary-hover: #005588;
+    --primary-container: #0067A5;
+    --primary-soft: #DCEFF7;
+    --on-primary: #FFFFFF;
+
+    --positive: #16A34A;
+    --positive-soft: #DCFCE7;
+    --neutral: #64748B;
+    --neutral-soft: #F1F5F9;
+    --negative: #DC2626;
+    --negative-soft: #FEE2E2;
+
+    --warning: #D97706;
+    --warning-soft: #FEF3C7;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: #F5F7F9;
+    color: #252525;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
