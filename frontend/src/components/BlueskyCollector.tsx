@@ -103,7 +103,7 @@ export function LiveSocialCollector({ isOpen, onToggle, onImportPosts }: Props) 
 
       const [ytRes, bskyRes, gdeltRes, gnewsRes, gplacesRes] = await Promise.allSettled(promises);
 
-      let newItems: Post[] = [];
+      const newItems: Post[] = [];
       let nextYtCursor: string | null = null;
       let nextBskyCursor: string | null = null;
       let caughtError: string | null = null;
