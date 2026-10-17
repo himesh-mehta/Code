@@ -69,6 +69,12 @@ function ListeningContent() {
   // Direct CSV Ingestion panel toggle state
   const [csvOpen, setCsvOpen] = useState(false);
 
+  // Hydration safety mount tracker
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Live Multi-Source Fetch State (YouTube, Bluesky, GDELT)
   const [liveFetching, setLiveFetching] = useState(false);
   const [liveStatus, setLiveStatus] = useState<{ message: string; ok: boolean } | null>(null);
@@ -174,28 +180,39 @@ function ListeningContent() {
   };
 
   // Derive source counts for compact source bar chart and source availability from query-matched posts
-  // We exclude the platform filter itself so each source pill accurately displays how many results match the active search/filters!
-  const sourceDistribution = [
+  // Backed by state to ensure 100% hydration matching between SSR and client
+  const [sourceDistribution, setSourceDistribution] = useState([
     { source: "YouTube", count: 0, platform: "youtube" },
     { source: "Bluesky", count: 0, platform: "bluesky" },
     { source: "GDELT News", count: 0, platform: "gdelt" },
     { source: "CSV Import", count: 0, platform: "csv_import" },
-  ];
+  ]);
 
-  // Query posts matching current query, date, topic, sentiment, questions, but without restricting platform
-  const matchingQueryPosts = store.queryPosts({
-    ...filters,
-    platform: undefined,
-    page: 1,
-    page_size: 10000,
-  }).items;
+  useEffect(() => {
+    if (!mounted) return;
+    const dist = [
+      { source: "YouTube", count: 0, platform: "youtube" },
+      { source: "Bluesky", count: 0, platform: "bluesky" },
+      { source: "GDELT News", count: 0, platform: "gdelt" },
+      { source: "CSV Import", count: 0, platform: "csv_import" },
+    ];
 
-  matchingQueryPosts.forEach((p) => {
-    const item = sourceDistribution.find((s) => s.platform === p.platform);
-    if (item) item.count++;
-  });
+    const matchingQueryPosts = store.queryPosts({
+      ...filters,
+      platform: undefined,
+      page: 1,
+      page_size: 10000,
+    }).items;
 
-  const activeSourcesWithData = sourceDistribution.filter((s) => s.count > 0);
+    matchingQueryPosts.forEach((p) => {
+      const item = dist.find((s) => s.platform === p.platform);
+      if (item) item.count++;
+    });
+
+    setSourceDistribution(dist);
+  }, [filters, posts, total, mounted]);
+
+  const activeSourcesWithData = mounted ? sourceDistribution.filter((s) => s.count > 0) : [];
 
   const getPlatformBadge = (platform: Platform) => {
     switch (platform) {
@@ -375,7 +392,10 @@ function ListeningContent() {
                     : "bg-white text-[#666666] border border-[#E5E7EB] hover:bg-[#DCEFF7] hover:text-[#0067A5]"
                 }`}
               >
-                All Sources ({sourceDistribution.reduce((acc, s) => acc + s.count, 0)})
+                <span>All Sources</span>
+                <span suppressHydrationWarning className="ml-1">
+                  ({mounted ? sourceDistribution.reduce((acc, s) => acc + s.count, 0) : 0})
+                </span>
               </button>
               {sourceDistribution.filter((s) => s.platform !== "csv_import" || s.count > 0).map((src) => {
                 const isActive = filters.platform === src.platform;
@@ -398,13 +418,14 @@ function ListeningContent() {
                   >
                     <span>{src.source}</span>
                     <span
+                      suppressHydrationWarning
                       className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                         isActive
                           ? "bg-white/20 text-white"
                           : "bg-[#F5F7F9] text-[#0067A5]"
                       }`}
                     >
-                      {src.count}
+                      {mounted ? src.count : 0}
                     </span>
                   </button>
                 );
