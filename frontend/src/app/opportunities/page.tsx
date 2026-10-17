@@ -28,7 +28,10 @@ import {
   Cell,
 } from "recharts";
 
+import { usePageContext } from "@/context/PageContext";
+
 function OpportunityContent() {
+  const { updatePageContext } = usePageContext();
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -49,6 +52,56 @@ function OpportunityContent() {
   useEffect(() => {
     loadData();
   }, [filters]);
+
+  useEffect(() => {
+    if (opportunities.length > 0) {
+      const high = opportunities.filter((o) => o.priority === "high").length;
+      const med = opportunities.filter((o) => o.priority === "medium").length;
+      const low = opportunities.filter((o) => o.priority === "low").length;
+      const expanded = opportunities.find((o) => o.id === expandedOppId);
+
+      updatePageContext({
+        route: "/opportunities",
+        page_name: "Opportunity Centre",
+        page_purpose:
+          "Prioritized conversation-to-campaign opportunities with transparent scoring breakdown (volume, growth, relevance, engagement, and unmet need).",
+        filters: { ...filters, priority_filter: priorityFilter },
+        metrics: {
+          total_opportunities: opportunities.length,
+          high_priority_count: high,
+          medium_priority_count: med,
+          low_priority_count: low,
+          top_ranked_opportunity: opportunities[0]?.title || "N/A",
+          top_score: opportunities[0]?.score || 0,
+        },
+        selected_item: expanded
+          ? {
+              id: expanded.id,
+              title: expanded.title,
+              priority: expanded.priority,
+              score: expanded.score,
+              why_it_matters: expanded.why_it_matters,
+              recommended_action: expanded.recommended_action,
+              score_breakdown: expanded.score_breakdown,
+            }
+          : undefined,
+        key_records: opportunities.slice(0, 5).map((o) => ({
+          id: o.id,
+          title: o.title,
+          priority: o.priority,
+          score: o.score,
+          topic: o.topic,
+          evidence_count: o.supporting_post_ids.length,
+        })),
+      });
+    }
+  }, [
+    opportunities,
+    filters,
+    priorityFilter,
+    expandedOppId,
+    updatePageContext,
+  ]);
 
   const filteredOpportunities = opportunities.filter((opp) => {
     if (priorityFilter === "all") return true;

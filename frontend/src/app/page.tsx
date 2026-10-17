@@ -38,9 +38,12 @@ import {
 
 const SENTIMENT_COLORS = ["#16A34A", "#64748B", "#DC2626"];
 
+import { usePageContext } from "@/context/PageContext";
+
 function OverviewContent() {
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const { updatePageContext } = usePageContext();
 
   const [filters, setFilters] = useState<PostsQuery>({
     date_range: "30d",
@@ -64,6 +67,40 @@ function OverviewContent() {
   useEffect(() => {
     loadData();
   }, [filters]);
+
+  useEffect(() => {
+    if (data) {
+      updatePageContext({
+        route: "/",
+        page_name: "Overview Dashboard",
+        page_purpose:
+          "Executive high-level summary of social listening telemetry, volume trends, sentiment distribution, and strategic priorities for Tata STRIVE.",
+        filters: { ...filters },
+        metrics: {
+          total_conversations: data.total_posts,
+          relevant_conversations: data.relevant_posts,
+          questions_detected: data.questions_detected,
+          positive_sentiment: `${data.sentiment_breakdown.positive}%`,
+          neutral_sentiment: `${data.sentiment_breakdown.neutral}%`,
+          negative_sentiment: `${data.sentiment_breakdown.negative}%`,
+          top_topic: data.top_topics[0]?.name || "None",
+          top_topic_volume: data.top_topics[0]?.post_count || 0,
+          emerging_topics_count: data.emerging_topics_count,
+          opportunities_count: data.opportunities_count,
+        },
+        sample_data_status: data.is_sample
+          ? "Sample-labeled dataset"
+          : "Live verified stream",
+        key_records: (data.recent_posts || []).slice(0, 5).map((p) => ({
+          platform: p.platform,
+          author: p.author_handle,
+          content: p.content,
+          topic: p.topic,
+          sentiment: p.sentiment,
+        })),
+      });
+    }
+  }, [data, filters, updatePageContext]);
 
   if (loading || !data) {
     return (

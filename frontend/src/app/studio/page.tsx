@@ -35,9 +35,12 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+import { usePageContext } from "@/context/PageContext";
+
 function StudioContent() {
   const searchParams = useSearchParams();
   const preselectedOppId = searchParams.get("opportunity") || "opp_01";
+  const { updatePageContext } = usePageContext();
 
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [selectedOppId, setSelectedOppId] = useState<string>(preselectedOppId);
@@ -58,6 +61,53 @@ function StudioContent() {
       }
     });
   }, [selectedOppId]);
+
+  useEffect(() => {
+    const currentOpp = opportunities.find((o) => o.id === selectedOppId);
+    updatePageContext({
+      route: "/studio",
+      page_name: "Content Studio",
+      page_purpose:
+        "AI campaign studio converting high-priority opportunities into actionable content ideas, captions, key messages, and measurable CTAs.",
+      filters: {
+        selected_opportunity_id: selectedOppId,
+        tone,
+        platform_filter: platform || "All Platforms",
+      },
+      metrics: {
+        opportunity_title: currentOpp?.title || "N/A",
+        opportunity_priority: currentOpp?.priority || "N/A",
+        opportunity_score: currentOpp?.score || 0,
+        content_formats_count: campaign?.content_ideas?.length || 0,
+        captions_count: campaign?.captions?.length || 0,
+        target_cta: campaign?.call_to_action || "N/A",
+      },
+      selected_item: campaign
+        ? {
+            opportunity_title: currentOpp?.title,
+            call_to_action: campaign.call_to_action,
+            key_messages: campaign.key_messages,
+            content_ideas: campaign.content_ideas,
+            success_metrics: campaign.success_metrics,
+          }
+        : undefined,
+      key_records: campaign
+        ? campaign.content_ideas.map((ci) => ({
+            format: ci.format,
+            title: ci.title,
+            description: ci.description,
+            target_audience: ci.target_audience,
+          }))
+        : undefined,
+    });
+  }, [
+    campaign,
+    selectedOppId,
+    tone,
+    platform,
+    opportunities,
+    updatePageContext,
+  ]);
 
   useEffect(() => {
     if (searchParams.get("opportunity")) {

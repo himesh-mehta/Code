@@ -15,6 +15,9 @@ export const metadata: Metadata = {
     "AI-powered social listening and conversation-to-campaign dashboard for Tata STRIVE skilling, employability, and youth development.",
 };
 
+import { PageContextProvider } from "@/context/PageContext";
+import { PulseAssistant } from "@/components/assistant/PulseAssistant";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -23,12 +26,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased bg-[#F5F7F9] text-[#252525]`}>
-        <Suspense fallback={<aside className="fixed left-0 top-0 h-full w-[240px] bg-[#0067A5] border-r border-[#005588]" />}>
-          <Sidebar />
-        </Suspense>
-        <div className="pl-[240px] min-h-screen flex flex-col bg-[#F5F7F9]">
-          {children}
-        </div>
+        <PageContextProvider>
+          <Suspense fallback={<aside className="fixed left-0 top-0 h-full w-[240px] bg-[#0067A5] border-r border-[#005588]" />}>
+            <Sidebar />
+          </Suspense>
+          <div className="pl-[240px] min-h-screen flex flex-col bg-[#F5F7F9]">
+            {children}
+          </div>
+          <PulseAssistant />
+        </PageContextProvider>
       </body>
     </html>
   );

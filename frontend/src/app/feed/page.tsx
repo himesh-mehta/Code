@@ -51,11 +51,13 @@ import { MetaTestPanel } from "@/components/MetaTestPanel";
 import { CsvUploadPanel } from "@/components/CsvUploadPanel";
 
 import { store } from "@/lib/data-store";
+import { usePageContext } from "@/context/PageContext";
 
 function ListeningContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const { updatePageContext } = usePageContext();
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
@@ -231,7 +233,56 @@ function ListeningContent() {
     });
   }
 
-  const activeSourcesWithData = sourceDistribution.filter((s) => s.count > 0);
+  useEffect(() => {
+    updatePageContext({
+      route: "/feed",
+      page_name: "Social Listening Feed",
+      page_purpose:
+        "Filterable multi-source feed of collected student feedback, reviews, discussions, and ratings across YouTube, Bluesky, GDELT, and CSV imports.",
+      filters: { ...filters },
+      metrics: {
+        total_matching_posts: total,
+        visible_on_page: posts.length,
+        current_page: filters.page || 1,
+        active_platform_filter: filters.platform || "All Sources",
+        active_sentiment_filter: filters.sentiment || "All Sentiments",
+        search_query: filters.query || "None",
+        is_question_filter: filters.is_question ? "Yes" : "No",
+        source_counts: sourceDistribution
+          .map((s) => `${s.source}: ${s.count}`)
+          .join(", "),
+      },
+      selected_item: activeArticle
+        ? {
+            type: "article_or_post",
+            id: activeArticle.id,
+            platform: activeArticle.platform,
+            title:
+              activeArticle.article_title ||
+              activeArticle.content.slice(0, 80),
+            author: activeArticle.author_handle,
+            sentiment: activeArticle.sentiment,
+            topic: activeArticle.topic,
+          }
+        : undefined,
+      sample_data_status: posts.some((p) => p.is_sample)
+        ? "Sample-labeled & Live Hybrid"
+        : "Live Verified Social Signals",
+      key_records: posts.slice(0, 6).map((p) => ({
+        id: p.id,
+        platform: p.platform,
+        author: p.author_handle,
+        content: p.content.slice(0, 160),
+        sentiment: p.sentiment,
+        topic: p.topic,
+        is_question: p.is_question,
+        likes: p.likes,
+        comments: p.comments,
+      })),
+    });
+  }, [posts, filters, total, activeArticle, sourceDistribution, updatePageContext]);
+
+  const activeSourcesWithData = mounted ? sourceDistribution.filter((s) => s.count > 0) : [];
 
   const getPlatformBadge = (platform: Platform) => {
     switch (platform) {
