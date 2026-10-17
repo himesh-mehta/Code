@@ -29,6 +29,7 @@ import {
   BookOpen,
   Key,
   ShieldCheck,
+  Cpu,
 } from "lucide-react";
 import {
   BarChart,
@@ -44,6 +45,7 @@ import { GdeltIntelligenceView } from "@/components/GdeltIntelligenceView";
 import { ArticleDetailModal } from "@/components/ArticleDetailModal";
 import { MetaTestPanel } from "@/components/MetaTestPanel";
 import { CsvUploadPanel } from "@/components/CsvUploadPanel";
+import { RobertaSentimentDrawer } from "@/components/RobertaSentimentDrawer";
 
 import { store } from "@/lib/data-store";
 
@@ -68,6 +70,8 @@ function ListeningContent() {
   const [bskyOpen, setBskyOpen] = useState(false);
   // Direct CSV Ingestion panel toggle state
   const [csvOpen, setCsvOpen] = useState(false);
+  // RoBERTa AI Sentiment Analyzer panel toggle state
+  const [robertaOpen, setRobertaOpen] = useState(false);
 
   // Hydration safety mount tracker
   const [mounted, setMounted] = useState(false);
@@ -322,6 +326,7 @@ function ListeningContent() {
               onClick={() => {
                 setCsvOpen(!csvOpen);
                 if (bskyOpen) setBskyOpen(false);
+                if (robertaOpen) setRobertaOpen(false);
               }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
                 csvOpen
@@ -331,6 +336,26 @@ function ListeningContent() {
             >
               <Upload className="w-3.5 h-3.5" />
               <span>Import CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setRobertaOpen(!robertaOpen);
+                if (bskyOpen) setBskyOpen(false);
+                if (csvOpen) setCsvOpen(false);
+              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                robertaOpen
+                  ? "bg-[#0067A5] text-white border-[#0067A5]"
+                  : "bg-white text-[#0067A5] border-[#E5E7EB] hover:bg-[#DCEFF7]"
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>AI Sentiment Model</span>
+              <span className="text-[9px] font-bold bg-[#DCEFF7] text-[#0067A5] px-1.5 py-0.2 rounded">
+                RoBERTa
+              </span>
             </button>
 
             <div className="bg-[#F5F7F9] p-0.5 rounded-lg border border-[#E5E7EB] flex text-xs">
@@ -379,6 +404,12 @@ function ListeningContent() {
               onImportSuccess={() => {
                 fetchPosts();
               }}
+            />
+
+            {/* RoBERTa AI Sentiment Analyzer Drawer */}
+            <RobertaSentimentDrawer
+              isOpen={robertaOpen}
+              onClose={() => setRobertaOpen(false)}
             />
 
             {/* Quick In-Page Platform Switcher */}

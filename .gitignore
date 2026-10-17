@@ -18,6 +18,14 @@ dist/
 build/
 coverage/
 
+# Python virtual environments & bytecode
+backend/venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
 # OS files
 .DS_Store
 Thumbs.db

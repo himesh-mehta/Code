@@ -100,6 +100,31 @@ export const api = {
     return store.importCsvFile(file);
   },
 
+  analyzeSentiment: async (
+    text: string
+  ): Promise<{
+    sentiment: "positive" | "neutral" | "negative";
+    confidence: number;
+    model: string;
+    backend?: string;
+  }> => {
+    try {
+      const res = await fetch("/api/sentiment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error("Failed to classify sentiment");
+      return await res.json();
+    } catch {
+      return {
+        sentiment: "neutral",
+        confidence: 0.5,
+        model: "cardiffnlp/twitter-roberta-base-sentiment-latest",
+      };
+    }
+  },
+
   searchYouTube: async (
     query: string,
     limit = 12,

@@ -62,6 +62,28 @@ AI-powered social listening, trend analysis, and conversation-to-campaign dashbo
 
 ---
 
+## 🧠 RoBERTa AI Sentiment Service (`cardiffnlp/twitter-roberta-base-sentiment-latest`)
+
+Social Pulse features deep learning sentiment classification powered by the official Hugging Face transformer model `cardiffnlp/twitter-roberta-base-sentiment-latest`.
+
+### 1. Run via CLI
+```bash
+python backend/sentiment_analyzer.py "The training was useful and helped me find a job!"
+# Output: {'sentiment': 'positive', 'confidence': 0.952}
+```
+
+### 2. Run the FastAPI Microservice
+```bash
+# Double-click backend/start_sentiment_service.bat or run:
+python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Swagger API docs available at `http://localhost:8000/docs`.
+
+### 3. Integrated on the Website
+On the **Social Listening** page (`/feed`), click the **"AI Sentiment Model"** button in the header to open the interactive RoBERTa classification drawer and test any feedback or review in real time!
+
+---
+
 ## 📊 CSV Dataset Ingestion
 
 You can upload custom feedback surveys, offline center reviews, or student inquiries directly from the **Social Listening** page:
