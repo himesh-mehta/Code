@@ -131,10 +131,27 @@ export function PageContextProvider({ children }: { children: ReactNode }) {
 
   const updatePageContext = useCallback(
     (updates: Partial<PageContextData>) => {
-      setContext((prev) => ({
-        ...prev,
-        ...updates,
-      }));
+      setContext((prev) => {
+        let hasChanged = false;
+        for (const key of Object.keys(updates) as (keyof PageContextData)[]) {
+          const newVal = updates[key];
+          const oldVal = prev[key];
+          if (typeof newVal === "object" && newVal !== null) {
+            if (JSON.stringify(newVal) !== JSON.stringify(oldVal)) {
+              hasChanged = true;
+              break;
+            }
+          } else if (newVal !== oldVal) {
+            hasChanged = true;
+            break;
+          }
+        }
+        if (!hasChanged) return prev;
+        return {
+          ...prev,
+          ...updates,
+        };
+      });
     },
     []
   );

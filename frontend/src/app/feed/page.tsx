@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useTransition, Suspense } from "react";
+import React, { useEffect, useState, useMemo, useTransition, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
 import { FilterBar } from "@/components/FilterBar";
@@ -210,30 +210,42 @@ function ListeningContent() {
   };
 
   // Strictly 5 platforms: YouTube, GDELT, Bluesky, Google News, Google Places Reviews
-  const sourceDistribution = [
-    { source: "YouTube", count: 0, platform: "youtube" },
-    { source: "GDELT News", count: 0, platform: "gdelt" },
-    { source: "Bluesky", count: 0, platform: "bluesky" },
-    { source: "Google News", count: 0, platform: "google_news" },
-    { source: "Google Places Reviews", count: 0, platform: "google_maps" },
-  ];
+  const sourceDistribution = useMemo(() => {
+    const dist = [
+      { source: "YouTube", count: 0, platform: "youtube" },
+      { source: "GDELT News", count: 0, platform: "gdelt" },
+      { source: "Bluesky", count: 0, platform: "bluesky" },
+      { source: "Google News", count: 0, platform: "google_news" },
+      { source: "Google Places Reviews", count: 0, platform: "google_maps" },
+    ];
 
-  // Query posts matching current query, date, topic, sentiment, questions, but without restricting platform
-  if (mounted) {
-    const matchingQueryPosts = store.queryPosts({
-      ...filters,
-      platform: undefined,
-      page: 1,
-      page_size: 10000,
-    }).items;
+    if (mounted) {
+      const matchingQueryPosts = store.queryPosts({
+        ...filters,
+        platform: undefined,
+        page: 1,
+        page_size: 10000,
+      }).items;
 
-    matchingQueryPosts.forEach((p) => {
-      const item = sourceDistribution.find((s) => s.platform === p.platform);
-      if (item) item.count++;
-    });
-  }
+      matchingQueryPosts.forEach((p) => {
+        const item = dist.find((s) => s.platform === p.platform);
+        if (item) item.count++;
+      });
+    }
+
+    return dist;
+  }, [mounted, filters, total]);
+
+  const activeSourcesWithData = useMemo(() => {
+    return mounted ? sourceDistribution.filter((s) => s.count > 0) : [];
+  }, [mounted, sourceDistribution]);
+
+  const sourceCountsSummary = useMemo(() => {
+    return sourceDistribution.map((s) => `${s.source}: ${s.count}`).join(", ");
+  }, [sourceDistribution]);
 
   useEffect(() => {
+    if (!mounted) return;
     updatePageContext({
       route: "/feed",
       page_name: "Social Listening Feed",
@@ -248,9 +260,7 @@ function ListeningContent() {
         active_sentiment_filter: filters.sentiment || "All Sentiments",
         search_query: filters.query || "None",
         is_question_filter: filters.is_question ? "Yes" : "No",
-        source_counts: sourceDistribution
-          .map((s) => `${s.source}: ${s.count}`)
-          .join(", "),
+        source_counts: sourceCountsSummary,
       },
       selected_item: activeArticle
         ? {
@@ -280,9 +290,15 @@ function ListeningContent() {
         comments: p.comments,
       })),
     });
-  }, [posts, filters, total, activeArticle, sourceDistribution, updatePageContext]);
-
-  const activeSourcesWithData = mounted ? sourceDistribution.filter((s) => s.count > 0) : [];
+  }, [
+    mounted,
+    total,
+    posts,
+    filters,
+    activeArticle,
+    sourceCountsSummary,
+    updatePageContext,
+  ]);
 
   const getPlatformBadge = (platform: Platform) => {
     switch (platform) {
