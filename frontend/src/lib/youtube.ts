@@ -100,7 +100,7 @@ export async function fetchYouTubePosts(
 
     // 2. Fetch statistics (views, likes, comments) for returned video IDs
     const videoIds = items.map((it: any) => it.id?.videoId).filter(Boolean);
-    let statsMap: Record<string, { likes: number; comments: number; views: number }> = {};
+    const statsMap: Record<string, { likes: number; comments: number; views: number }> = {};
 
     if (videoIds.length > 0) {
       try {

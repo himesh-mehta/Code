@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, Suspense } from "react";
+import React, { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
 import { EvidencePosts } from "@/components/EvidencePosts";
@@ -115,13 +115,7 @@ function StudioContent() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    if (selectedOppId && !campaign) {
-      handleGenerate();
-    }
-  }, [selectedOppId]);
-
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     if (!selectedOppId) return;
     setGenerating(true);
     try {
@@ -136,7 +130,13 @@ function StudioContent() {
     } finally {
       setGenerating(false);
     }
-  };
+  }, [selectedOppId, tone, platform]);
+
+  useEffect(() => {
+    if (selectedOppId && !campaign) {
+      handleGenerate();
+    }
+  }, [selectedOppId, campaign, handleGenerate]);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);

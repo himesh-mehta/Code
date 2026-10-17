@@ -22,3 +22,10 @@ coverage/
 .DS_Store
 Thumbs.db
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
