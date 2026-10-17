@@ -13,15 +13,23 @@ import {
   RotateCcw,
   Newspaper,
   BookOpen,
+  Star,
 } from "lucide-react";
 
 interface Props {
   post: Post;
   highlightQuery?: string;
   onReadInPage?: (post: Post) => void;
+  onViewComments?: (post: Post) => void;
+  onShare?: (post: Post) => void;
 }
 
-export function PostCard({ post, onReadInPage }: Props) {
+export function PostCard({
+  post,
+  onReadInPage,
+  onViewComments,
+  onShare,
+}: Props) {
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
   const [imageError, setImageError] = useState(false);
 
@@ -50,6 +58,14 @@ export function PostCard({ post, onReadInPage }: Props) {
         return <Globe className="w-3.5 h-3.5 text-[#008FD3]" />;
       case "gdelt":
         return <Newspaper className="w-3.5 h-3.5 text-amber-600" />;
+      case "google_news":
+        return <Newspaper className="w-3.5 h-3.5 text-blue-600" />;
+      case "google_maps":
+        return (
+          <svg className="w-3.5 h-3.5 text-emerald-600 fill-current" viewBox="0 0 24 24">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+          </svg>
+        );
       default:
         return <Globe className="w-3.5 h-3.5 text-[#0067A5]" />;
     }
@@ -99,6 +115,10 @@ export function PostCard({ post, onReadInPage }: Props) {
         return "Read Full Article";
       case "bluesky":
         return "View on Bluesky";
+      case "google_news":
+        return "Read on Google News";
+      case "google_maps":
+        return "View on Google Maps";
       default:
         return "View Source";
     }
@@ -205,67 +225,107 @@ export function PostCard({ post, onReadInPage }: Props) {
             {post.topic}
           </span>
 
-          <div className="flex items-center gap-3 tabular-nums text-[11px]">
+          <div className="flex items-center gap-2 tabular-nums text-[11px]">
+            {post.rating !== undefined && (
+              <span className="inline-flex items-center gap-1 text-amber-600 font-semibold text-[11px] bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                <span>{post.rating}.0</span>
+              </span>
+            )}
             {post.likes !== undefined && (
-              <span className="inline-flex items-center gap-1 hover:text-[#252525]">
-                <Heart className="w-3.5 h-3.5" />
-                <span>{post.likes}</span>
+              <span className="inline-flex items-center gap-1 text-[#666666]">
+                <Heart className="w-3.5 h-3.5 text-red-500/70" />
+                <span>{post.likes.toLocaleString()}</span>
               </span>
             )}
             {post.comments !== undefined && (
-              <span className="inline-flex items-center gap-1 hover:text-[#252525]">
+              <button
+                type="button"
+                onClick={() => onViewComments && onViewComments(post)}
+                className="inline-flex items-center gap-1 text-[#0067A5] hover:text-[#005588] hover:bg-[#DCEFF7] px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                title="View comments & replies"
+              >
                 <MessageCircle className="w-3.5 h-3.5" />
-                <span>{post.comments}</span>
-              </span>
+                <span className="font-semibold">{post.comments.toLocaleString()}</span>
+              </button>
             )}
             {post.shares !== undefined && (
-              <span className="inline-flex items-center gap-1 hover:text-[#252525]">
+              <button
+                type="button"
+                onClick={() => onShare && onShare(post)}
+                className="inline-flex items-center gap-1 text-[#666666] hover:text-[#252525] hover:bg-gray-100 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                title="Share insight"
+              >
                 <Share2 className="w-3.5 h-3.5" />
-                <span>{post.shares}</span>
-              </span>
+                <span>{post.shares.toLocaleString()}</span>
+              </button>
             )}
           </div>
         </div>
 
         {/* Dedicated Platform Action Links */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-dashed border-[#E5E7EB]">
-          {/* In-Page Reader trigger for GDELT or full read */}
-          {post.platform === "gdelt" && onReadInPage ? (
+          <div className="flex items-center gap-1.5">
+            {/* View Comments Button */}
             <button
-              onClick={() => onReadInPage(post)}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0067A5] hover:text-[#005588] bg-[#DCEFF7]/60 hover:bg-[#DCEFF7] px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+              type="button"
+              onClick={() => onViewComments && onViewComments(post)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0067A5] hover:text-[#005588] bg-[#DCEFF7] hover:bg-[#cbe6f3] px-2 py-1 rounded-md transition-colors cursor-pointer"
+              title="See discussion comments"
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Read In-Page</span>
+              <MessageCircle className="w-3 h-3" />
+              <span>Comments {post.comments !== undefined ? `(${post.comments.toLocaleString()})` : ""}</span>
             </button>
-          ) : (
-            <div className="flex items-center gap-1 text-[10px] text-[#666666]">
-              {!post.is_sample ? (
-                <span className="text-[9px] uppercase tracking-wider text-emerald-700 font-bold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 inline-flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-                  Verified Signal
-                </span>
-              ) : (
-                <span className="text-[9px] uppercase tracking-wider text-amber-700 font-semibold px-1 py-0.5 rounded bg-amber-50 border border-amber-200">
-                  Sample
-                </span>
-              )}
-            </div>
-          )}
 
-          {/* Validated External Link with explicit platform label */}
-          {post.url ? (
-            <a
-              href={post.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-[#0067A5] hover:bg-[#005588] text-white transition-colors shadow-2xs cursor-pointer ml-auto"
-              title={`Open authentic content on ${post.platform}`}
+            {/* Share Button */}
+            <button
+              type="button"
+              onClick={() => onShare && onShare(post)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#666666] hover:text-[#252525] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+              title="Share this signal"
             >
-              <span>{getExternalLinkText(post.platform)}</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          ) : null}
+              <Share2 className="w-3 h-3" />
+              <span>Share</span>
+            </button>
+
+            {/* In-Page Reader trigger for GDELT or full read */}
+            {post.platform === "gdelt" && onReadInPage && (
+              <button
+                onClick={() => onReadInPage(post)}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0067A5] hover:text-[#005588] bg-[#DCEFF7]/60 hover:bg-[#DCEFF7] px-2 py-1 rounded-md transition-colors cursor-pointer"
+              >
+                <BookOpen className="w-3 h-3" />
+                <span>Read In-Page</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto">
+            {!post.is_sample ? (
+              <span className="text-[9px] uppercase tracking-wider text-emerald-700 font-bold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                Verified Signal
+              </span>
+            ) : (
+              <span className="text-[9px] uppercase tracking-wider text-amber-700 font-semibold px-1 py-0.5 rounded bg-amber-50 border border-amber-200">
+                Sample
+              </span>
+            )}
+
+            {/* Validated External Link with explicit platform label */}
+            {post.url ? (
+              <a
+                href={post.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#0067A5] hover:bg-[#005588] text-white transition-colors shadow-2xs cursor-pointer"
+                title={`Open authentic content on ${post.platform}`}
+              >
+                <span>{getExternalLinkText(post.platform)}</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            ) : null}
+          </div>
         </div>
       </div>
     </article>

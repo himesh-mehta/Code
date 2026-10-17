@@ -219,9 +219,9 @@ export function transformGdeltArticle(raw: RawGdeltArticle, query: string, index
     domain,
     media_url: raw.socialimage || null,
     posted_at: publishedAt,
-    likes: Math.floor(Math.random() * 25) + 5, // Media reader bookmark proxy
-    comments: Math.floor(Math.random() * 8),
-    shares: Math.floor(Math.random() * 15) + 2,
+    likes: undefined,
+    comments: undefined,
+    shares: undefined,
     topic,
     sentiment: tone,
     is_question: (raw.title || "").includes("?"),

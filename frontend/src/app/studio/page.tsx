@@ -173,11 +173,12 @@ function StudioContent() {
                 onChange={(e) => setPlatform(e.target.value as Platform | "")}
                 className="w-full h-9 px-3 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] text-xs text-[#252525] focus:outline-none focus:border-[#0067A5]"
               >
-                <option value="">Cross-Platform (LinkedIn, Instagram, YouTube, X)</option>
-                <option value="linkedin">LinkedIn</option>
-                <option value="instagram">Instagram</option>
-                <option value="youtube">YouTube</option>
-                <option value="twitter">X / Twitter</option>
+                <option value="">Multi-Channel (YouTube, GDELT, Bluesky, Google News & Places)</option>
+                <option value="youtube">YouTube (Video Shorts / Community)</option>
+                <option value="bluesky">Bluesky (Discourse & Microblogging)</option>
+                <option value="google_news">Google News (Press & Regional Outreach)</option>
+                <option value="google_maps">Google Places (Center Reviews & Engagement)</option>
+                <option value="gdelt">GDELT (Global Press & TVET Monitoring)</option>
               </select>
             </div>
           </div>

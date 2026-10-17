@@ -22,7 +22,8 @@ const SOURCES_CONFIG: { id: Platform; label: string }[] = [
   { id: "youtube", label: "YouTube" },
   { id: "gdelt", label: "GDELT News" },
   { id: "bluesky", label: "Bluesky" },
-  { id: "csv_import", label: "CSV Imports" },
+  { id: "google_news", label: "Google News" },
+  { id: "google_maps", label: "Google Places Reviews" },
 ];
 
 export function FilterBar({

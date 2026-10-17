@@ -102,21 +102,21 @@ function OverviewContent() {
     },
   ];
 
-  // A. Conversation volume over time data (Daily vs Weekly, with source comparison)
+  // A. Conversation volume over time data (Daily vs Weekly, with source comparison) strictly for the 5 platforms
   const volumeDailyData = [
-    { date: "Oct 06", total: 18, youtube: 6, linkedin: 5, instagram: 3, other: 4 },
-    { date: "Oct 08", total: 24, youtube: 8, linkedin: 7, instagram: 4, other: 5 },
-    { date: "Oct 10", total: 32, youtube: 11, linkedin: 10, instagram: 5, other: 6 },
-    { date: "Oct 12", total: 45, youtube: 16, linkedin: 14, instagram: 7, other: 8 },
-    { date: "Oct 14", total: 62, youtube: 22, linkedin: 19, instagram: 9, other: 12 },
-    { date: "Oct 16", total: 85, youtube: 29, linkedin: 26, instagram: 14, other: 16 },
+    { date: "Oct 06", total: 18, youtube: 6, gdelt: 5, bluesky: 4, google_news: 3 },
+    { date: "Oct 08", total: 24, youtube: 8, gdelt: 6, bluesky: 5, google_news: 5 },
+    { date: "Oct 10", total: 32, youtube: 11, gdelt: 8, bluesky: 7, google_news: 6 },
+    { date: "Oct 12", total: 45, youtube: 16, gdelt: 12, bluesky: 9, google_news: 8 },
+    { date: "Oct 14", total: 62, youtube: 22, gdelt: 16, bluesky: 13, google_news: 11 },
+    { date: "Oct 16", total: 85, youtube: 29, gdelt: 23, bluesky: 18, google_news: 15 },
   ];
 
   const volumeWeeklyData = [
-    { date: "Wk 38", total: 95, youtube: 32, linkedin: 28, instagram: 16, other: 19 },
-    { date: "Wk 39", total: 140, youtube: 48, linkedin: 42, instagram: 24, other: 26 },
-    { date: "Wk 40", total: 195, youtube: 68, linkedin: 59, instagram: 33, other: 35 },
-    { date: "Wk 41", total: 266, youtube: 92, linkedin: 81, instagram: 45, other: 48 },
+    { date: "Wk 38", total: 95, youtube: 32, gdelt: 25, bluesky: 21, google_news: 17 },
+    { date: "Wk 39", total: 140, youtube: 48, gdelt: 38, bluesky: 30, google_news: 24 },
+    { date: "Wk 40", total: 195, youtube: 68, gdelt: 52, bluesky: 42, google_news: 33 },
+    { date: "Wk 41", total: 266, youtube: 92, gdelt: 71, bluesky: 58, google_news: 45 },
   ];
 
   const volumeChartData = volumeAggregation === "daily" ? volumeDailyData : volumeWeeklyData;
@@ -147,20 +147,14 @@ function OverviewContent() {
     switch (platform) {
       case "youtube":
         return <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">YouTube</span>;
-      case "linkedin":
-        return <span className="text-[10px] font-bold text-[#0067A5] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">LinkedIn</span>;
       case "bluesky":
         return <span className="text-[10px] font-bold text-[#008FD3] bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">Bluesky</span>;
-      case "instagram":
-        return <span className="text-[10px] font-bold text-pink-600 bg-pink-50 px-1.5 py-0.5 rounded border border-pink-200">Instagram</span>;
-      case "facebook":
-        return <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Facebook</span>;
+      case "gdelt":
+        return <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">GDELT News</span>;
+      case "google_news":
+        return <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">Google News</span>;
       case "google_maps":
-        return <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Google Maps</span>;
-      case "google_play":
-        return <span className="text-[10px] font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">Google Play</span>;
-      case "csv_import":
-        return <span className="text-[10px] font-bold text-[#0067A5] bg-[#DCEFF7] px-1.5 py-0.5 rounded border border-[#008FD3]/30">CSV Import</span>;
+        return <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Google Places</span>;
       default:
         return <span className="text-[10px] font-bold text-[#666666] bg-gray-50 px-1.5 py-0.5 rounded border border-[#E5E7EB]">{platform}</span>;
     }
@@ -357,8 +351,9 @@ function OverviewContent() {
                         {compareSourcesInVolume && (
                           <>
                             <Line type="monotone" dataKey="youtube" name="YouTube" stroke="#dc2626" strokeWidth={1.5} strokeDasharray="3 3" />
-                            <Line type="monotone" dataKey="linkedin" name="LinkedIn" stroke="#008FD3" strokeWidth={1.5} strokeDasharray="3 3" />
-                            <Line type="monotone" dataKey="instagram" name="Instagram" stroke="#db2777" strokeWidth={1.5} strokeDasharray="3 3" />
+                            <Line type="monotone" dataKey="gdelt" name="GDELT" stroke="#d97706" strokeWidth={1.5} strokeDasharray="3 3" />
+                            <Line type="monotone" dataKey="bluesky" name="Bluesky" stroke="#008FD3" strokeWidth={1.5} strokeDasharray="3 3" />
+                            <Line type="monotone" dataKey="google_news" name="Google News" stroke="#2563eb" strokeWidth={1.5} strokeDasharray="3 3" />
                           </>
                         )}
                       </LineChart>

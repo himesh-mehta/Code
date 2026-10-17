@@ -29,6 +29,9 @@ import {
   BookOpen,
   Key,
   ShieldCheck,
+  MessageCircle,
+  Share2,
+  Heart,
 } from "lucide-react";
 import {
   BarChart,
@@ -42,6 +45,8 @@ import Link from "next/link";
 import { BlueskyCollector } from "@/components/BlueskyCollector";
 import { GdeltIntelligenceView } from "@/components/GdeltIntelligenceView";
 import { ArticleDetailModal } from "@/components/ArticleDetailModal";
+import { CommentsModal } from "@/components/CommentsModal";
+import { ShareModal } from "@/components/ShareModal";
 import { MetaTestPanel } from "@/components/MetaTestPanel";
 import { CsvUploadPanel } from "@/components/CsvUploadPanel";
 
@@ -58,8 +63,21 @@ function ListeningContent() {
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   const [showSourceVolumeChart, setShowSourceVolumeChart] = useState(true);
 
+  // Mount state to prevent SSR/client hydration count divergence
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // In-page article detail reader state (GDELT News and full media dispatches)
   const [activeArticle, setActiveArticle] = useState<Post | null>(null);
+
+  // Discussion & Comments modal state across all 5 platforms
+  const [activeCommentsPost, setActiveCommentsPost] = useState<Post | null>(null);
+
+  // Share insight modal state across all 5 platforms
+  const [activeSharePost, setActiveSharePost] = useState<Post | null>(null);
 
   // Active view: Omni-channel feed vs GDELT News Intelligence
   const [activeTab, setActiveTab] = useState<"omni" | "gdelt">("omni");
@@ -84,7 +102,7 @@ function ListeningContent() {
     date_range: (searchParams.get("date_range") as any) || "30d",
     sort: (searchParams.get("sort") as any) || "recent",
     page: 1,
-    page_size: 15,
+    page_size: 50,
   });
 
   const [searchInput, setSearchInput] = useState(filters.query || "");
@@ -111,20 +129,24 @@ function ListeningContent() {
     if (query) {
       setLiveFetching(true);
       setLiveStatus({
-        message: `Querying public streams from YouTube, Bluesky & GDELT for "${query}"...`,
+        message: `Querying public streams from YouTube, GDELT, Bluesky, Google News & Google Places Reviews for "${query}"...`,
         ok: true,
       });
 
       try {
-        const [ytRes, bskyRes, gdeltRes] = await Promise.allSettled([
-          api.searchYouTube(query, 10),
-          api.searchBluesky(query, 10),
-          api.searchGdelt(query, "30d", 10),
+        const [ytRes, bskyRes, gdeltRes, gnewsRes, gplacesRes] = await Promise.allSettled([
+          api.searchYouTube(query, 25),
+          api.searchBluesky(query, 30),
+          api.searchGdelt(query, "30d", 25),
+          api.searchGoogleNews(query, 25),
+          api.searchGooglePlaces(query, 15),
         ]);
 
         let ytCount = 0;
         let bskyCount = 0;
         let gdeltCount = 0;
+        let gnewsCount = 0;
+        let gplacesCount = 0;
 
         if (ytRes.status === "fulfilled" && ytRes.value) {
           const ytItems = ytRes.value.items || ytRes.value.posts || [];
@@ -144,14 +166,26 @@ function ListeningContent() {
           gdeltCount = collectResult.added || gdeltRes.value.articles.length;
         }
 
+        if (gnewsRes.status === "fulfilled" && gnewsRes.value?.items?.length > 0) {
+          const collectResult = api.collectPosts(gnewsRes.value.items);
+          gnewsCount = collectResult.added || gnewsRes.value.items.length;
+        }
+
+        if (gplacesRes.status === "fulfilled" && gplacesRes.value?.items?.length > 0) {
+          const collectResult = api.collectPosts(gplacesRes.value.items);
+          gplacesCount = collectResult.added || gplacesRes.value.items.length;
+        }
+
         const counts: string[] = [];
         if (ytCount > 0) counts.push(`${ytCount} from YouTube`);
+        if (gdeltCount > 0) counts.push(`${gdeltCount} from GDELT`);
         if (bskyCount > 0) counts.push(`${bskyCount} from Bluesky`);
-        if (gdeltCount > 0) counts.push(`${gdeltCount} from GDELT News`);
+        if (gnewsCount > 0) counts.push(`${gnewsCount} from Google News`);
+        if (gplacesCount > 0) counts.push(`${gplacesCount} from Google Places`);
 
         if (counts.length > 0) {
           setLiveStatus({
-            message: `Fetched & connected live discussions: ${counts.join(", ")} for "${query}"!`,
+            message: `Fetched live discussions: ${counts.join(", ")} for "${query}"!`,
             ok: true,
           });
         } else {
@@ -173,27 +207,29 @@ function ListeningContent() {
     setFilters({ ...filters, query: query || undefined, page: 1 });
   };
 
-  // Derive source counts for compact source bar chart and source availability from query-matched posts
-  // We exclude the platform filter itself so each source pill accurately displays how many results match the active search/filters!
+  // Strictly 5 platforms: YouTube, GDELT, Bluesky, Google News, Google Places Reviews
   const sourceDistribution = [
     { source: "YouTube", count: 0, platform: "youtube" },
-    { source: "Bluesky", count: 0, platform: "bluesky" },
     { source: "GDELT News", count: 0, platform: "gdelt" },
-    { source: "CSV Import", count: 0, platform: "csv_import" },
+    { source: "Bluesky", count: 0, platform: "bluesky" },
+    { source: "Google News", count: 0, platform: "google_news" },
+    { source: "Google Places Reviews", count: 0, platform: "google_maps" },
   ];
 
   // Query posts matching current query, date, topic, sentiment, questions, but without restricting platform
-  const matchingQueryPosts = store.queryPosts({
-    ...filters,
-    platform: undefined,
-    page: 1,
-    page_size: 10000,
-  }).items;
+  if (mounted) {
+    const matchingQueryPosts = store.queryPosts({
+      ...filters,
+      platform: undefined,
+      page: 1,
+      page_size: 10000,
+    }).items;
 
-  matchingQueryPosts.forEach((p) => {
-    const item = sourceDistribution.find((s) => s.platform === p.platform);
-    if (item) item.count++;
-  });
+    matchingQueryPosts.forEach((p) => {
+      const item = sourceDistribution.find((s) => s.platform === p.platform);
+      if (item) item.count++;
+    });
+  }
 
   const activeSourcesWithData = sourceDistribution.filter((s) => s.count > 0);
 
@@ -201,22 +237,14 @@ function ListeningContent() {
     switch (platform) {
       case "youtube":
         return <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">YouTube</span>;
-      case "linkedin":
-        return <span className="text-[10px] font-bold text-[#0067A5] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">LinkedIn</span>;
       case "bluesky":
         return <span className="text-[10px] font-bold text-[#008FD3] bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">Bluesky</span>;
       case "gdelt":
         return <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">GDELT News</span>;
-      case "instagram":
-        return <span className="text-[10px] font-bold text-pink-600 bg-pink-50 px-1.5 py-0.5 rounded border border-pink-200">Instagram</span>;
-      case "facebook":
-        return <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Facebook</span>;
+      case "google_news":
+        return <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">Google News</span>;
       case "google_maps":
-        return <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Google Maps</span>;
-      case "google_play":
-        return <span className="text-[10px] font-bold text-green-700 bg-green-50 px-1.5 py-0.5 rounded border border-green-200">Google Play</span>;
-      case "csv_import":
-        return <span className="text-[10px] font-bold text-[#0067A5] bg-[#DCEFF7] px-1.5 py-0.5 rounded border border-[#008FD3]/30">CSV Import</span>;
+        return <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">Google Places</span>;
       default:
         return <span className="text-[10px] font-bold text-[#666666] bg-gray-50 px-1.5 py-0.5 rounded border border-[#E5E7EB]">{platform}</span>;
     }
@@ -227,9 +255,13 @@ function ListeningContent() {
       case "youtube":
         return "Watch on YouTube";
       case "gdelt":
-        return "Read Full Article";
+        return "Read on GDELT";
       case "bluesky":
         return "View on Bluesky";
+      case "google_news":
+        return "Read on Google News";
+      case "google_maps":
+        return "View on Google Maps";
       default:
         return "View Source";
     }
@@ -297,7 +329,7 @@ function ListeningContent() {
               }`}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>Live Social Collector (YT, Bluesky, GDELT)</span>
+              <span>Live Streams Collector (5 Platforms)</span>
             </button>
 
             <button
@@ -368,6 +400,7 @@ function ListeningContent() {
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-none">
               <button
                 type="button"
+                suppressHydrationWarning
                 onClick={() => setFilters({ ...filters, platform: undefined, page: 1 })}
                 className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap transition-all cursor-pointer ${
                   !filters.platform
@@ -375,7 +408,7 @@ function ListeningContent() {
                     : "bg-white text-[#666666] border border-[#E5E7EB] hover:bg-[#DCEFF7] hover:text-[#0067A5]"
                 }`}
               >
-                All Sources ({sourceDistribution.reduce((acc, s) => acc + s.count, 0)})
+                All Sources {mounted ? `(${sourceDistribution.reduce((acc, s) => acc + s.count, 0)})` : ""}
               </button>
               {sourceDistribution.filter((s) => s.platform !== "csv_import" || s.count > 0).map((src) => {
                 const isActive = filters.platform === src.platform;
@@ -383,6 +416,7 @@ function ListeningContent() {
                   <button
                     key={src.platform}
                     type="button"
+                    suppressHydrationWarning
                     onClick={() =>
                       setFilters({
                         ...filters,
@@ -397,15 +431,18 @@ function ListeningContent() {
                     }`}
                   >
                     <span>{src.source}</span>
-                    <span
-                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                        isActive
-                          ? "bg-white/20 text-white"
-                          : "bg-[#F5F7F9] text-[#0067A5]"
-                      }`}
-                    >
-                      {src.count}
-                    </span>
+                    {mounted && (
+                      <span
+                        suppressHydrationWarning
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                          isActive
+                            ? "bg-white/20 text-white"
+                            : "bg-[#F5F7F9] text-[#0067A5]"
+                        }`}
+                      >
+                        {src.count}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -465,14 +502,16 @@ function ListeningContent() {
             </div>
 
             <div className="h-32 w-full pt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={activeSourcesWithData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
-                  <XAxis dataKey="source" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }} />
-                  <Bar dataKey="count" name="Conversations" fill="#0067A5" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {mounted && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={activeSourcesWithData} margin={{ top: 5, right: 10, left: -25, bottom: 0 }}>
+                    <XAxis dataKey="source" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }} />
+                    <Bar dataKey="count" name="Conversations" fill="#0067A5" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
         )}
@@ -538,6 +577,21 @@ function ListeningContent() {
                 <option value="engagement">Sort: Highest Engagement</option>
                 <option value="rating">Sort: Highest Rating</option>
               </select>
+
+              <div className="flex items-center gap-1.5 text-xs text-[#666666]">
+                <span>Show:</span>
+                <select
+                  value={filters.page_size || 50}
+                  onChange={(e) =>
+                    setFilters({ ...filters, page_size: parseInt(e.target.value, 10), page: 1 })
+                  }
+                  className="h-8 px-2 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] text-xs text-[#252525] focus:outline-none focus:border-[#0067A5] cursor-pointer font-medium"
+                >
+                  <option value={20}>20 per page</option>
+                  <option value={50}>50 per page</option>
+                  <option value={100}>100 (View All)</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -677,15 +731,46 @@ function ListeningContent() {
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap tabular-nums text-[11px] text-[#666666]">
                         {post.rating ? (
-                          <span className="font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                            {post.rating} / 5 ★
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                              {post.rating} / 5 ★
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setActiveCommentsPost(post)}
+                              className="inline-flex items-center gap-1 text-[#0067A5] hover:underline cursor-pointer"
+                              title="View reviews thread"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              <span>{post.comments || 0} reviews</span>
+                            </button>
+                          </div>
                         ) : (
-                          <span className="space-x-1.5 text-[10px]">
+                          <div className="flex items-center gap-2 text-[10px]">
                             {post.likes !== undefined && <span>{post.likes} likes</span>}
-                            {post.shares !== undefined && post.shares > 0 && <span>{post.shares} reposts</span>}
-                            {post.comments !== undefined && <span>{post.comments} {post.platform === "bluesky" ? "replies" : "comments"}</span>}
-                          </span>
+                            {post.comments !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveCommentsPost(post)}
+                                className="inline-flex items-center gap-1 text-[#0067A5] font-semibold hover:underline cursor-pointer bg-[#DCEFF7]/60 hover:bg-[#DCEFF7] px-1.5 py-0.5 rounded"
+                                title="View comments & discussion"
+                              >
+                                <MessageCircle className="w-3 h-3" />
+                                <span>{post.comments} comments</span>
+                              </button>
+                            )}
+                            {post.shares !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveSharePost(post)}
+                                className="inline-flex items-center gap-1 text-[#666666] hover:text-[#252525] hover:bg-gray-100 px-1.5 py-0.5 rounded cursor-pointer"
+                                title="Share insight"
+                              >
+                                <Share2 className="w-3 h-3" />
+                                <span>{post.shares}</span>
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap text-[#666666] text-[11px]">
@@ -693,6 +778,28 @@ function ListeningContent() {
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-1.5">
+                          {/* Quick Comments Button */}
+                          <button
+                            type="button"
+                            onClick={() => setActiveCommentsPost(post)}
+                            className="text-[11px] font-semibold text-[#0067A5] hover:text-[#005588] bg-[#DCEFF7] hover:bg-[#cbe6f3] px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="See discussion comments"
+                          >
+                            <MessageCircle className="w-3 h-3" />
+                            <span>Comments</span>
+                          </button>
+
+                          {/* Quick Share Button */}
+                          <button
+                            type="button"
+                            onClick={() => setActiveSharePost(post)}
+                            className="text-[11px] font-semibold text-[#666666] hover:text-[#252525] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="Share this insight"
+                          >
+                            <Share2 className="w-3 h-3" />
+                            <span>Share</span>
+                          </button>
+
                           {post.platform === "gdelt" && (
                             <button
                               onClick={() => setActiveArticle(post)}
@@ -731,6 +838,8 @@ function ListeningContent() {
                 key={post.id}
                 post={post}
                 onReadInPage={(p) => setActiveArticle(p)}
+                onViewComments={(p) => setActiveCommentsPost(p)}
+                onShare={(p) => setActiveSharePost(p)}
               />
             ))}
           </div>
@@ -771,6 +880,25 @@ function ListeningContent() {
       <ArticleDetailModal
         post={activeArticle}
         onClose={() => setActiveArticle(null)}
+      />
+
+      {/* Discussion & Comments Modal across all 5 platforms */}
+      <CommentsModal
+        post={activeCommentsPost}
+        onClose={() => setActiveCommentsPost(null)}
+        onCommentAdded={(p, newCount) => {
+          setPosts((prev) =>
+            prev.map((item) =>
+              item.id === p.id ? { ...item, comments: newCount } : item
+            )
+          );
+        }}
+      />
+
+      {/* 1-Click Share Modal across all 5 platforms */}
+      <ShareModal
+        post={activeSharePost}
+        onClose={() => setActiveSharePost(null)}
       />
     </>
   );

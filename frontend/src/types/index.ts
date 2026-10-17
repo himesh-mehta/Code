@@ -3,13 +3,14 @@
 export type Platform =
   | "youtube"
   | "bluesky"
+  | "gdelt"
+  | "google_news"
+  | "google_maps"
   | "instagram"
   | "facebook"
   | "linkedin"
-  | "google_maps"
   | "google_play"
   | "csv_import"
-  | "gdelt"
   | "reddit"
   | "twitter"
   | "other";
@@ -21,6 +22,15 @@ export interface SentimentBreakdown {
   positive: number;
   neutral: number;
   negative: number;
+}
+
+export interface CommentItem {
+  id: string;
+  author_handle: string;
+  content: string;
+  posted_at: string;
+  likes?: number;
+  is_official?: boolean;
 }
 
 export interface Post {
@@ -46,6 +56,7 @@ export interface Post {
   place_id?: string | null;
   article_title?: string | null;
   domain?: string | null;
+  comment_list?: CommentItem[];
 }
 
 export interface TrendPoint {

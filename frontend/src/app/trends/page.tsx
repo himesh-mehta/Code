@@ -148,15 +148,13 @@ function TrendsContent() {
     };
   });
 
-  // D. Source comparison data
+  // D. Source comparison data strictly for the 5 platforms
   const sourceComparisonData = [
     { source: "YouTube", count: 28, platform: "youtube" },
-    { source: "LinkedIn", count: 24, platform: "linkedin" },
-    { source: "Bluesky", count: 12, platform: "bluesky" },
-    { source: "Instagram", count: 16, platform: "instagram" },
-    { source: "Facebook", count: 18, platform: "facebook" },
-    { source: "Google Maps", count: 8, platform: "google_maps" },
-    { source: "Google Play", count: 6, platform: "google_play" },
+    { source: "GDELT News", count: 22, platform: "gdelt" },
+    { source: "Bluesky", count: 25, platform: "bluesky" },
+    { source: "Google News", count: 18, platform: "google_news" },
+    { source: "Google Places Reviews", count: 12, platform: "google_maps" },
   ];
 
   // E. Question themes clusters with original representative examples
@@ -202,13 +200,13 @@ function TrendsContent() {
     },
   ];
 
-  // F. Engagement comparison excluding unavailable platform metrics
+  // F. Engagement comparison strictly for the 5 platforms
   const engagementComparisonData = [
     { channel: "YouTube", avgLikes: 342, avgComments: 68, metricNote: "Video watch interaction" },
-    { channel: "LinkedIn", avgLikes: 415, avgComments: 80, metricNote: "Professional feed discussions" },
-    { channel: "Instagram", avgLikes: 165, avgComments: 36, metricNote: "Visual carousel saves & DMs" },
-    { channel: "Facebook", avgLikes: 275, avgComments: 67, metricNote: "Community group shares" },
-    { channel: "Bluesky", avgLikes: 71, avgComments: 18, metricNote: "Public microblog replies" },
+    { channel: "GDELT News", avgLikes: 195, avgComments: 34, metricNote: "Global press citations & syndication" },
+    { channel: "Bluesky", avgLikes: 71, avgComments: 18, metricNote: "Public microblog replies & reposts" },
+    { channel: "Google News", avgLikes: 210, avgComments: 45, metricNote: "Regional readership & shares" },
+    { channel: "Google Places", avgLikes: 85, avgComments: 28, metricNote: "Student reviews & ratings" },
   ];
 
   // G. Date-period comparison

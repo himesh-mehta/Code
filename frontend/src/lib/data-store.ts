@@ -1,5 +1,6 @@
 import {
   Post,
+  CommentItem,
   Topic,
   AudienceQuestion,
   Opportunity,
@@ -23,190 +24,20 @@ export const SCORE_WEIGHTS: Record<keyof ScoreBreakdown, number> = {
   sentiment_gap: 0.1,
 };
 
-// Initial verified dataset of collected conversations across sources (100% verified working URLs)
-export const INITIAL_POSTS: Post[] = [
-  // YouTube (Verified live video dispatches with thumbnails & embed support)
-  {
-    id: "yt_01",
-    platform: "youtube",
-    author_handle: "@TechSkillIndia",
-    content: "Is learning generative AI prompts useful for non-CS students? Most webinars don't give a realistic roadmap for B.Com or Arts freshers.",
-    posted_at: "2026-10-16T14:20:00Z",
-    likes: 342,
-    comments: 84,
-    topic: "Practical AI skills",
-    sentiment: "neutral",
-    is_question: true,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=OLzQ-kmxMrc",
-    video_id: "OLzQ-kmxMrc",
-    media_url: "https://img.youtube.com/vi/OLzQ-kmxMrc/hqdefault.jpg",
-    is_sample: false,
-  },
-  {
-    id: "yt_02",
-    platform: "youtube",
-    author_handle: "@CareerCoachRakesh",
-    content: "Tata STRIVE free vocational courses in solar PV installation and electric vehicle technician are producing 100% placement in Maharashtra.",
-    posted_at: "2026-10-15T11:00:00Z",
-    likes: 890,
-    comments: 112,
-    shares: 145,
-    topic: "Vocational training access",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=_KMicBmQtSc",
-    video_id: "_KMicBmQtSc",
-    media_url: "https://img.youtube.com/vi/_KMicBmQtSc/hqdefault.jpg",
-    is_sample: false,
-  },
-  {
-    id: "yt_03",
-    platform: "youtube",
-    author_handle: "@fresher_ananya",
-    content: "I gave 3 campus interviews. Technical was clear, but got rejected in the HR discussion. How do I practice behavioral answers?",
-    posted_at: "2026-10-14T09:15:00Z",
-    likes: 215,
-    comments: 48,
-    topic: "Interview preparation",
-    sentiment: "negative",
-    is_question: true,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=9IUGBupxPnY",
-    video_id: "9IUGBupxPnY",
-    media_url: "https://img.youtube.com/vi/9IUGBupxPnY/hqdefault.jpg",
-    is_sample: false,
-  },
+import { INITIAL_POSTS } from "./initial-posts";
+export { INITIAL_POSTS };
 
-  // Bluesky (Public AT Protocol live social posts)
-  {
-    id: "bs_01",
-    platform: "bluesky",
-    author_handle: "@meridia.news",
-    content: "AI tools for small business accounting and retail inventory are accelerating. We need short community college courses on prompt tools, not another theoretical deep learning seminar.",
-    posted_at: "2026-10-15T19:20:00Z",
-    likes: 88,
-    comments: 19,
-    shares: 14,
-    topic: "Practical AI skills",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://bsky.app/profile/meridia.news/post/3mxz5rso6jw25",
-    is_sample: false,
-  },
-  {
-    id: "bs_02",
-    platform: "bluesky",
-    author_handle: "@benwolfevision.bsky.social",
-    content: "Where do students find verified mentors for first-time job guidance in Tier-2/3 Indian cities? Guidance deficit is very real.",
-    posted_at: "2026-10-12T15:40:00Z",
-    likes: 54,
-    comments: 16,
-    topic: "Career guidance",
-    sentiment: "negative",
-    is_question: true,
-    is_relevant: true,
-    url: "https://bsky.app/profile/benwolfevision.bsky.social/post/3my225k3hkk2q",
-    is_sample: false,
-  },
-
-  // GDELT News (Verified live journalism dispatches with headline, domain & in-page reader support)
-  {
-    id: "gdelt_01",
-    platform: "gdelt",
-    author_handle: "tatatrusts.org",
-    content: "Tata STRIVE Skilling & Livelihood Initiative: Empowering youth with industry-ready vocational skills across green energy, solar PV, and modern retail.",
-    article_title: "Tata STRIVE Skilling & Livelihood Initiative: Empowering youth with industry-ready vocational skills",
-    domain: "tatatrusts.org",
-    posted_at: "2026-10-16T08:30:00Z",
-    likes: 24,
-    comments: 6,
-    shares: 18,
-    topic: "Vocational training access",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.tatatrusts.org/our-work/livelihood/tata-strive",
-    is_sample: false,
-  },
-  {
-    id: "gdelt_02",
-    platform: "gdelt",
-    author_handle: "moneycontrol.com",
-    content: "Tata Chemicals shares rise up to 5% as RBI retains Tata Sons in Upper-Layer NBFC list, reinforcing group corporate governance and capital expenditure.",
-    article_title: "Tata Chemicals shares rise up to 5% as RBI retains Tata Sons in Upper-Layer NBFC list",
-    domain: "moneycontrol.com",
-    posted_at: "2026-10-15T12:15:00Z",
-    likes: 31,
-    comments: 4,
-    shares: 12,
-    topic: "Employability",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.moneycontrol.com/news/business/markets/tata-chemicals-shares-rise-up-to-5-as-rbi-retains-tata-sons-in-the-upper-layer-nbfc-list-here-s-why-13997259.html",
-    is_sample: false,
-  },
-  {
-    id: "gdelt_03",
-    platform: "gdelt",
-    author_handle: "rediff.com",
-    content: "Tata Group faces massive funding and expansion roadmap for workforce skilling and new manufacturing ecosystem projects.",
-    article_title: "Tata Group faces massive funding and expansion roadmap for workforce skilling",
-    domain: "rediff.com",
-    posted_at: "2026-10-14T10:45:00Z",
-    likes: 19,
-    comments: 5,
-    shares: 9,
-    topic: "Employability",
-    sentiment: "neutral",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.rediff.com/business/report/tata-group-faces-massive-funding-challenge/20260826.htm",
-    is_sample: false,
-  },
-  {
-    id: "gdelt_04",
-    platform: "gdelt",
-    author_handle: "thehindu.com",
-    content: "Tata Group corporate and community skilling developments across India: Focus on TVET modernization and certified apprenticeships.",
-    article_title: "Tata Group corporate and community skilling developments across India",
-    domain: "thehindu.com",
-    posted_at: "2026-10-13T14:20:00Z",
-    likes: 42,
-    comments: 8,
-    shares: 22,
-    topic: "Vocational training access",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.thehindu.com/topic/tata-group/",
-    is_sample: false,
-  },
-  {
-    id: "gdelt_05",
-    platform: "gdelt",
-    author_handle: "timesofindia.indiatimes.com",
-    content: "Tata STRIVE vocational training and career development programs: Over 1 million youth reached with structured employment modules.",
-    article_title: "Tata STRIVE vocational training and career development programs",
-    domain: "timesofindia.indiatimes.com",
-    posted_at: "2026-10-12T09:10:00Z",
-    likes: 28,
-    comments: 7,
-    shares: 15,
-    topic: "Vocational training access",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://timesofindia.indiatimes.com/topic/Tata-STRIVE",
-    is_sample: false,
-  },
-];
 
 const SETTINGS_KEY = "social_pulse_settings";
-const POSTS_STORAGE_KEY = "social_pulse_posts_v6_real_only";
+const POSTS_STORAGE_KEY = "social_pulse_posts_v12_strict_5";
+
+export const ALLOWED_PLATFORMS = new Set<Platform>([
+  "youtube",
+  "gdelt",
+  "bluesky",
+  "google_news",
+  "google_maps",
+]);
 
 export class DataStore {
   private posts: Post[] = [];
@@ -245,8 +76,12 @@ export class DataStore {
           process.env.NEXT_PUBLIC_YOUTUBE_API_KEY || "";
       }
 
-      // Purge old mock storage versions
+      // Purge old storage versions
       try {
+        localStorage.removeItem("social_pulse_posts_v11_authentic_95");
+        localStorage.removeItem("social_pulse_posts_v10");
+        localStorage.removeItem("social_pulse_posts_v6_real_only");
+        localStorage.removeItem("social_pulse_posts_v5");
         localStorage.removeItem("social_pulse_posts_v4");
         localStorage.removeItem("social_pulse_posts_v3");
         localStorage.removeItem("social_pulse_posts_v2");
@@ -254,14 +89,13 @@ export class DataStore {
         localStorage.removeItem("social_pulse_posts");
       } catch {}
 
-      // Load posts - strictly filter to authentic platforms only (no fake/mock data)
-      const allowedPlatforms = new Set(["youtube", "gdelt", "bluesky", "csv_import"]);
+      // Load posts - strictly authentic 5 platforms only
       try {
         const savedPosts = localStorage.getItem(POSTS_STORAGE_KEY);
         if (savedPosts) {
           const parsed = JSON.parse(savedPosts);
-          this.posts = Array.isArray(parsed)
-            ? parsed.filter((p: Post) => allowedPlatforms.has(p.platform))
+          this.posts = Array.isArray(parsed) && parsed.length >= 70
+            ? parsed.filter((p: Post) => ALLOWED_PLATFORMS.has(p.platform))
             : [...INITIAL_POSTS];
           if (this.posts.length === 0) {
             this.posts = [...INITIAL_POSTS];
@@ -309,6 +143,7 @@ export class DataStore {
     const existingUrls = new Set(this.posts.map((p) => p.url).filter(Boolean));
 
     const uniqueNew = newPosts.filter((p) => {
+      if (!ALLOWED_PLATFORMS.has(p.platform)) return false;
       if (existingIds.has(p.id)) return false;
       if (p.url && existingUrls.has(p.url)) return false;
       return true;
@@ -384,13 +219,38 @@ export class DataStore {
     if (query.query) {
       const q = query.query.toLowerCase().trim();
       const terms = q.split(/\s+/).filter(Boolean);
+
+      // Domain keywords recognition
+      const isSkillingQuery = terms.some((t) =>
+        ["skill", "skilling", "skills", "upskill", "reskill", "learn", "course", "training", "tvet", "iti", "vocational"].some((k) => t.includes(k) || k.includes(t))
+      );
+      const isJobQuery = terms.some((t) =>
+        ["job", "jobs", "employ", "employability", "career", "placement", "interview", "hiring", "work", "apprentice"].some((k) => t.includes(k) || k.includes(t))
+      );
+      const isTataQuery = terms.some((t) =>
+        ["tata", "strive", "tatastrive"].some((k) => t.includes(k) || k.includes(t))
+      );
+
       result = result.filter((p) => {
-        const fullContent = `${p.content} ${p.author_handle} ${p.topic}`.toLowerCase();
+        const fullContent = `${p.content} ${p.author_handle} ${p.topic} ${p.article_title || ""} ${p.domain || ""}`.toLowerCase();
         if (fullContent.includes(q)) return true;
-        // Match word stems like 'skilling' -> 'skill'
+
+        if (isTataQuery && (fullContent.includes("tata") || fullContent.includes("strive") || p.url?.includes("tatastrive") || p.url?.includes("tata"))) {
+          return true;
+        }
+
+        if (isSkillingQuery && (p.is_relevant || fullContent.includes("skill") || fullContent.includes("training") || fullContent.includes("course") || fullContent.includes("vocational") || fullContent.includes("apprentice") || fullContent.includes("ai") || fullContent.includes("solar") || fullContent.includes("technician"))) {
+          return true;
+        }
+
+        if (isJobQuery && (p.is_relevant || fullContent.includes("job") || fullContent.includes("placement") || fullContent.includes("interview") || fullContent.includes("career") || fullContent.includes("employ") || fullContent.includes("hired") || fullContent.includes("stipend"))) {
+          return true;
+        }
+
+        // Match individual words or stems
         return terms.some((term) => {
           if (term.length > 3) {
-            const root = term.endsWith("ing") ? term.slice(0, -3) : term;
+            const root = term.endsWith("ing") ? term.slice(0, -3) : term.endsWith("s") ? term.slice(0, -1) : term;
             return fullContent.includes(root);
           }
           return fullContent.includes(term);
@@ -645,6 +505,42 @@ export class DataStore {
     });
 
     return opps.sort((a, b) => b.score - a.score);
+  }
+
+  public getPostComments(postId: string): CommentItem[] {
+    const post = this.posts.find((p) => p.id === postId);
+    if (!post) return [];
+    return post.comment_list || [];
+  }
+
+  public addCommentToPost(
+    postId: string,
+    comment: { author_handle: string; content: string; is_official?: boolean }
+  ): CommentItem {
+    const post = this.posts.find((p) => p.id === postId);
+    const newComment: CommentItem = {
+      id: `comm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      author_handle: comment.author_handle || "@TataSTRIVE_Team",
+      content: comment.content,
+      posted_at: new Date().toISOString(),
+      likes: 1,
+      is_official: comment.is_official ?? true,
+    };
+
+    if (post) {
+      if (!post.comment_list) {
+        post.comment_list = [];
+      }
+      post.comment_list.unshift(newComment);
+      post.comments = post.comment_list.length;
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(this.posts));
+        } catch {}
+      }
+    }
+
+    return newComment;
   }
 }
 
