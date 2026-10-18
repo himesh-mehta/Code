@@ -26,6 +26,11 @@ export const SCORE_WEIGHTS: Record<keyof ScoreBreakdown, number> = {
 
 import { INITIAL_POSTS } from "./initial-posts";
 export { INITIAL_POSTS };
+import {
+  classifyPostTopic,
+  classifyPostSentiment,
+  interleavePostsRoundRobin,
+} from "./feed-analytics";
 
 
 const SETTINGS_KEY = "social_pulse_settings";
@@ -95,7 +100,14 @@ export class DataStore {
         if (savedPosts) {
           const parsed = JSON.parse(savedPosts);
           this.posts = Array.isArray(parsed)
-            ? parsed.filter((p: Post) => ALLOWED_PLATFORMS.has(p.platform))
+            ? parsed.filter((p: Post) => ALLOWED_PLATFORMS.has(p.platform)).map((p: Post) => {
+                if (!p.topic_id || !p.topic) {
+                  const t = classifyPostTopic(p.content, undefined, p.article_title || "");
+                  p.topic = p.topic || t.topic;
+                  p.topic_id = p.topic_id || t.topic_id;
+                }
+                return p;
+              })
             : [];
         } else {
           this.posts = [];
@@ -146,7 +158,18 @@ export class DataStore {
     });
 
     if (uniqueNew.length > 0) {
-      this.posts = [...uniqueNew, ...this.posts];
+      const enrichedNew = uniqueNew.map((p) => {
+        const t = classifyPostTopic(p.content, undefined, p.article_title || "");
+        const sentiment = classifyPostSentiment(p.content, p.is_question);
+        return {
+          ...p,
+          topic: p.topic && p.topic !== "General" ? p.topic : t.topic,
+          topic_id: p.topic_id || t.topic_id,
+          sentiment: p.sentiment || sentiment,
+        };
+      });
+
+      this.posts = [...enrichedNew, ...this.posts];
       if (typeof window !== "undefined") {
         localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(this.posts));
       }
@@ -194,10 +217,15 @@ export class DataStore {
       result = result.filter((p) => p.sentiment === query.sentiment);
     }
 
-    // Topic filter
+    // Topic filter (matches topic name or topic_id slug)
     if (query.topic) {
+      const target = query.topic.toLowerCase().trim();
       result = result.filter(
-        (p) => p.topic.toLowerCase() === query.topic?.toLowerCase()
+        (p) =>
+          p.topic.toLowerCase() === target ||
+          p.topic_id?.toLowerCase() === target ||
+          target.includes(p.topic.toLowerCase()) ||
+          p.topic.toLowerCase().includes(target)
       );
     }
 
@@ -268,6 +296,11 @@ export class DataStore {
         (a, b) =>
           new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime()
       );
+    }
+
+    // Interleave across platforms for All Sources view (on by default)
+    if (query.mix_sources !== false && !query.platform) {
+      result = interleavePostsRoundRobin(result);
     }
 
     const total = result.length;

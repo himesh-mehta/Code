@@ -5,12 +5,8 @@ import {
   MessageSquare,
   Sparkles,
   HelpCircle,
-  TrendingUp,
   ThumbsUp,
-  CheckCircle2,
   RefreshCw,
-  AlertCircle,
-  ExternalLink,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -50,7 +46,7 @@ export function YoutubeCommentAnalysisCard({ topic, onSelectQuestion }: Props) {
   const [data, setData] = useState<CommentAnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showAllQuotes, setShowAllQuotes] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   const fetchAnalysis = async (searchTopic: string) => {
     setLoading(true);
@@ -75,21 +71,21 @@ export function YoutubeCommentAnalysisCard({ topic, onSelectQuestion }: Props) {
 
   if (loading && !data) {
     return (
-      <div className="stitch-card p-6 border-l-4 border-l-red-500 space-y-4 animate-pulse">
+      <div className="stitch-card p-5 border-l-4 border-l-red-500 space-y-3 animate-pulse">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600">
-              <span className="material-symbols-outlined text-[18px]">smart_display</span>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-red-100 flex items-center justify-center text-red-600">
+              <span className="material-symbols-outlined text-[16px]">smart_display</span>
             </div>
-            <div className="h-4 w-48 bg-gray-200 rounded"></div>
+            <div className="h-4 w-36 bg-gray-200 rounded"></div>
           </div>
-          <div className="h-6 w-20 bg-gray-200 rounded-full"></div>
+          <div className="h-5 w-16 bg-gray-200 rounded-full"></div>
         </div>
-        <div className="h-12 w-full bg-gray-100 rounded-xl"></div>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="h-16 bg-gray-100 rounded-xl"></div>
-          <div className="h-16 bg-gray-100 rounded-xl"></div>
-          <div className="h-16 bg-gray-100 rounded-xl"></div>
+        <div className="h-10 w-full bg-gray-100 rounded-xl"></div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="h-12 bg-gray-100 rounded-lg"></div>
+          <div className="h-12 bg-gray-100 rounded-lg"></div>
+          <div className="h-12 bg-gray-100 rounded-lg"></div>
         </div>
       </div>
     );
@@ -103,24 +99,19 @@ export function YoutubeCommentAnalysisCard({ topic, onSelectQuestion }: Props) {
   if (!analysis) return null;
 
   return (
-    <section className="stitch-card p-6 border-l-4 border-l-red-500 space-y-5 transition-all">
+    <section className="stitch-card p-5 border-l-4 border-l-red-500 space-y-4 transition-all">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0 shadow-2xs border border-red-200">
-            <span className="material-symbols-outlined text-[20px]">smart_display</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0 border border-red-200">
+            <span className="material-symbols-outlined text-[18px]">smart_display</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base font-bold text-[#001e2d]">
-                YouTube Community Comment Analysis
-              </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 text-[11px] font-bold">
-                Topic: {analysis.topic}
-              </span>
-            </div>
-            <p className="text-xs text-[#3f4852] mt-0.5">
-              Synthesized from {analysis.totalCommentsAnalyzed} viewer comments across {analysis.videosAnalyzed} top YouTube videos
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-[#001e2d] truncate">
+              YouTube Comment Analysis
+            </h3>
+            <p className="text-[11px] text-[#3f4852] truncate">
+              {analysis.totalCommentsAnalyzed} comments ({analysis.videosAnalyzed} videos)
             </p>
           </div>
         </div>
@@ -128,172 +119,160 @@ export function YoutubeCommentAnalysisCard({ topic, onSelectQuestion }: Props) {
         <button
           onClick={() => fetchAnalysis(topic)}
           disabled={loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f0f9ff] text-[#00629e] hover:bg-[#def0ff] text-xs font-semibold border border-[#cae6fb] self-start sm:self-auto cursor-pointer transition-colors"
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#f0f9ff] text-[#00629e] hover:bg-[#def0ff] text-[11px] font-semibold border border-[#cae6fb] shrink-0 cursor-pointer transition-colors"
           title="Refresh live comment analysis"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0099f2]" : ""}`} />
-          <span>{loading ? "Analyzing..." : "Re-Analyze"}</span>
+          <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin text-[#0099f2]" : ""}`} />
+          <span>{loading ? "..." : "Re-Analyze"}</span>
         </button>
       </div>
 
-      {/* Executive Takeaway */}
-      <div className="p-3.5 rounded-xl bg-[#f5faff] border border-[#0099f2]/15 text-xs text-[#001e2d] leading-relaxed flex items-start gap-2.5">
-        <Sparkles className="w-4 h-4 text-[#0099f2] flex-shrink-0 mt-0.5" />
-        <div>
+      {/* AI Community Takeaway */}
+      <div className="p-3 rounded-xl bg-[#f5faff] border border-[#0099f2]/15 text-xs text-[#001e2d] leading-relaxed flex items-start gap-2">
+        <Sparkles className="w-3.5 h-3.5 text-[#0099f2] shrink-0 mt-0.5" />
+        <div className="text-[11px]">
           <span className="font-bold text-[#00629e]">AI Community Takeaway: </span>
           <span>{analysis.executiveSummary}</span>
         </div>
       </div>
 
-      {/* 3 Metric Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+      {/* 3 Metric Stats Tiles (compact row / grid) */}
+      <div className="grid grid-cols-3 gap-2 text-center">
         {/* Positive Sentiment */}
-        <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200/60 flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wide">
-              Positive Sentiment
-            </span>
-            <div className="text-2xl font-extrabold text-emerald-900 mt-0.5">
-              {analysis.sentimentBreakdown.positive}%
-            </div>
-            <span className="text-[10px] text-emerald-700 font-medium">Receptive community tone</span>
+        <div className="p-2 rounded-xl bg-emerald-50/70 border border-emerald-200/60">
+          <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wide block truncate">
+            Positive
+          </span>
+          <div className="text-lg font-black text-emerald-900 leading-tight">
+            {analysis.sentimentBreakdown.positive}%
           </div>
-          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700">
-            <TrendingUp className="w-4 h-4" />
-          </div>
+          <span className="text-[9px] text-emerald-700 font-medium block truncate">Receptive</span>
         </div>
 
-        {/* Questions Detected */}
-        <div className="p-3.5 rounded-xl bg-sky-50/70 border border-sky-200/60 flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-bold text-sky-800 uppercase tracking-wide">
-              Inquiry Ratio
-            </span>
-            <div className="text-2xl font-extrabold text-sky-900 mt-0.5">
-              {analysis.sentimentBreakdown.questionRatio}%
-            </div>
-            <span className="text-[10px] text-sky-700 font-medium">Direct learner questions</span>
+        {/* Inquiries */}
+        <div className="p-2 rounded-xl bg-sky-50/70 border border-sky-200/60">
+          <span className="text-[9px] font-bold text-sky-800 uppercase tracking-wide block truncate">
+            Inquiries
+          </span>
+          <div className="text-lg font-black text-sky-900 leading-tight">
+            {analysis.sentimentBreakdown.questionRatio}%
           </div>
-          <div className="w-8 h-8 rounded-full bg-sky-100 flex items-center justify-center text-sky-700">
-            <HelpCircle className="w-4 h-4" />
-          </div>
+          <span className="text-[9px] text-sky-700 font-medium block truncate">Questions</span>
         </div>
 
-        {/* Critical/Constructive */}
-        <div className="p-3.5 rounded-xl bg-amber-50/70 border border-amber-200/60 flex items-center justify-between">
-          <div>
-            <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wide">
-              Clarification Needs
-            </span>
-            <div className="text-2xl font-extrabold text-amber-900 mt-0.5">
-              {analysis.sentimentBreakdown.negative + analysis.sentimentBreakdown.neutral}%
-            </div>
-            <span className="text-[10px] text-amber-700 font-medium">Fees, eligibility &amp; doubts</span>
+        {/* Doubts / Clarification */}
+        <div className="p-2 rounded-xl bg-amber-50/70 border border-amber-200/60">
+          <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wide block truncate">
+            Doubts
+          </span>
+          <div className="text-lg font-black text-amber-900 leading-tight">
+            {analysis.sentimentBreakdown.negative + analysis.sentimentBreakdown.neutral}%
           </div>
-          <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
-            <MessageSquare className="w-4 h-4" />
-          </div>
+          <span className="text-[9px] text-amber-700 font-medium block truncate">Fees / Eligibility</span>
         </div>
       </div>
 
-      {/* Themes & Common Questions Split */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-        {/* Left: Top Recurring Themes */}
-        <div className="space-y-2.5">
-          <span className="font-bold text-[#001e2d] flex items-center gap-1.5 text-xs">
-            <span className="w-2 h-2 rounded-full bg-[#0099f2]"></span>
-            <span>Recurring Comment Themes</span>
+      {/* Themes & Questions */}
+      <div className="space-y-3 text-xs">
+        {/* Recurring Themes */}
+        <div>
+          <span className="font-bold text-[#001e2d] flex items-center gap-1.5 text-[11px] mb-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0099f2]"></span>
+            <span>Recurring Themes</span>
           </span>
-          <div className="flex flex-wrap gap-2">
-            {analysis.topThemes.map((theme, idx) => (
+          <div className="flex flex-wrap gap-1.5">
+            {analysis.topThemes.slice(0, 4).map((theme, idx) => (
               <span
                 key={idx}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#eaf5ff] border border-[#0099f2]/20 text-[#00629e] font-semibold text-xs"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eaf5ff] border border-[#0099f2]/20 text-[#00629e] font-semibold text-[10px]"
               >
                 <span>{theme.theme}</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-[#0099f2]/10 text-[#0099f2] text-[10px] font-bold">
-                  {theme.count} mentions
-                </span>
+                <span className="text-[9px] opacity-75 font-normal">({theme.count})</span>
               </span>
             ))}
           </div>
         </div>
 
-        {/* Right: Top Learner Inquiries */}
-        <div className="space-y-2.5">
-          <span className="font-bold text-[#001e2d] flex items-center gap-1.5 text-xs">
-            <span className="w-2 h-2 rounded-full bg-red-500"></span>
-            <span>Common Viewer Questions</span>
-          </span>
-          <div className="space-y-2">
-            {analysis.commonQuestions.slice(0, 3).map((q, idx) => (
-              <div
-                key={idx}
-                onClick={() => onSelectQuestion && onSelectQuestion(q)}
-                className="p-2.5 rounded-lg bg-gray-50 hover:bg-[#def0ff] border border-gray-200/70 hover:border-[#0099f2]/30 text-[#001e2d] text-xs transition-colors cursor-pointer flex items-start gap-2 group"
-                title="Click to focus on this inquiry"
-              >
-                <HelpCircle className="w-3.5 h-3.5 text-[#0099f2] flex-shrink-0 mt-0.5" />
-                <span className="group-hover:text-[#00629e] leading-snug line-clamp-2">
-                  &quot;{q}&quot;
-                </span>
-              </div>
-            ))}
+        {/* Common Viewer Questions */}
+        {analysis.commonQuestions.length > 0 && (
+          <div>
+            <span className="font-bold text-[#001e2d] flex items-center gap-1.5 text-[11px] mb-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+              <span>Common Viewer Questions</span>
+            </span>
+            <div className="space-y-1.5">
+              {analysis.commonQuestions.slice(0, 2).map((q, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => onSelectQuestion && onSelectQuestion(q)}
+                  className="p-2 rounded-lg bg-gray-50 hover:bg-[#def0ff] border border-gray-200/70 hover:border-[#0099f2]/30 text-[#001e2d] text-[11px] transition-colors cursor-pointer flex items-start gap-1.5 group"
+                  title="Click to search this question"
+                >
+                  <HelpCircle className="w-3 h-3 text-[#0099f2] shrink-0 mt-0.5" />
+                  <span className="group-hover:text-[#00629e] leading-snug line-clamp-2">
+                    &quot;{q}&quot;
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Top Comment Quotes */}
+      {/* Collapsible Verbatim Comments */}
       {analysis.topComments.length > 0 && (
-        <div className="pt-2 border-t border-[#0099f2]/10 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#001e2d] flex items-center gap-1.5">
-              <MessageSquare className="w-3.5 h-3.5 text-red-500" />
-              <span>Verbatim Comment Highlights from Live YouTube Videos</span>
+        <div className="pt-2 border-t border-[#0099f2]/10 space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowComments(!showComments)}
+            className="w-full flex items-center justify-between text-[11px] font-bold text-[#00629e] hover:text-[#001e2d] cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <MessageSquare className="w-3 h-3 text-red-500" />
+              <span>Verbatim Highlights ({analysis.topComments.length})</span>
             </span>
-            <button
-              onClick={() => setShowAllQuotes(!showAllQuotes)}
-              className="text-[11px] font-semibold text-[#0099f2] hover:underline flex items-center gap-1 cursor-pointer"
-            >
-              <span>{showAllQuotes ? "Show Less" : `View ${analysis.topComments.length} Comments`}</span>
-              {showAllQuotes ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-          </div>
+            <span className="inline-flex items-center gap-0.5 text-[#0099f2]">
+              {showComments ? "Collapse" : "View comments"}
+              {showComments ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </span>
+          </button>
 
-          <div className="space-y-2">
-            {(showAllQuotes ? analysis.topComments : analysis.topComments.slice(0, 2)).map((c, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-xl bg-white border border-[#0099f2]/15 shadow-2xs space-y-1.5 text-xs"
-              >
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="font-bold text-[#001e2d]">{c.author}</span>
-                  <div className="flex items-center gap-2">
-                    {c.likes > 0 && (
-                      <span className="inline-flex items-center gap-1 text-gray-500 font-medium">
-                        <ThumbsUp className="w-3 h-3 text-red-500" />
-                        <span>{c.likes}</span>
+          {showComments && (
+            <div className="space-y-2 animate-fade-in-up pt-1">
+              {analysis.topComments.slice(0, 3).map((c, idx) => (
+                <div
+                  key={idx}
+                  className="p-2.5 rounded-lg bg-white border border-[#0099f2]/15 shadow-2xs space-y-1 text-xs"
+                >
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-bold text-[#001e2d] truncate max-w-[150px]">{c.author}</span>
+                    <div className="flex items-center gap-1.5">
+                      {c.likes > 0 && (
+                        <span className="inline-flex items-center gap-0.5 text-gray-500 font-medium">
+                          <ThumbsUp className="w-2.5 h-2.5 text-red-500" />
+                          <span>{c.likes}</span>
+                        </span>
+                      )}
+                      <span
+                        className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
+                          c.sentiment === "positive"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : c.sentiment === "negative"
+                            ? "bg-rose-50 text-rose-700"
+                            : "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {c.sentiment}
                       </span>
-                    )}
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        c.sentiment === "positive"
-                          ? "bg-emerald-50 text-emerald-700"
-                          : c.sentiment === "negative"
-                          ? "bg-rose-50 text-rose-700"
-                          : "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {c.sentiment}
-                    </span>
+                    </div>
                   </div>
+                  <p className="text-[#3f4852] italic text-[11px] leading-relaxed line-clamp-3">
+                    &quot;{c.content}&quot;
+                  </p>
                 </div>
-                <p className="text-[#3f4852] italic leading-relaxed">
-                  &quot;{c.content}&quot;
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>

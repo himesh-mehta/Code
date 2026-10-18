@@ -44,6 +44,8 @@ export interface Post {
   shares?: number;
   rating?: number; // 1-5 for reviews (Google Maps, Google Play)
   topic: string;
+  topic_id?: string;
+  location?: string;
   sentiment: Sentiment;
   is_question: boolean;
   is_relevant?: boolean; // Relevant skilling & employability conversation
@@ -253,11 +255,13 @@ export interface PostsQuery {
   platform?: Platform;
   sentiment?: Sentiment;
   topic?: string;
+  topic_id?: string;
   is_question?: boolean;
   is_relevant?: boolean;
   date_range?: "7d" | "14d" | "30d" | "90d" | "all";
   ids?: string[];
   sort?: "recent" | "engagement" | "rating";
+  mix_sources?: boolean;
   page?: number;
   page_size?: number;
 }

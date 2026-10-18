@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
 import { FilterBar } from "@/components/FilterBar";
 import { PostCard } from "@/components/PostCard";
+import { SentimentBreakdownCard } from "@/components/SentimentBreakdownCard";
+import { YoutubeCommentAnalysisCard } from "@/components/YoutubeCommentAnalysisCard";
 import { api } from "@/lib/api";
 import { Post, Platform, Sentiment, PostsQuery } from "@/types";
 import {
@@ -25,7 +27,6 @@ import {
   Globe,
   Newspaper,
   MessageCircle,
-  Share2,
   RefreshCw,
   Activity,
   Check,
@@ -46,10 +47,18 @@ import { ArticleDetailModal } from "@/components/ArticleDetailModal";
 import { CommentsModal } from "@/components/CommentsModal";
 import { ShareModal } from "@/components/ShareModal";
 import { CsvUploadPanel } from "@/components/CsvUploadPanel";
-import { YoutubeCommentAnalysisCard } from "@/components/YoutubeCommentAnalysisCard";
 import { store } from "@/lib/data-store";
 import { usePageContext } from "@/context/PageContext";
 import { SAMPLE_TRENDING_TOPICS } from "@/lib/sampleData";
+import {
+  computeTopTopics,
+  formatCount,
+  formatChange,
+} from "@/lib/feed-analytics";
+
+// Flags for legacy controls (preserved in code, not rendered on screen)
+const SHOW_LEGACY_CONTROLS = false;
+const SHOW_LEGACY_COLLECTOR = false;
 
 function ListeningContent() {
   const searchParams = useSearchParams();
@@ -59,26 +68,10 @@ function ListeningContent() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
-  const [trendingTopics, setTrendingTopics] = useState<any[]>([]);
+  const [mixSources, setMixSources] = useState(true);
 
-  // Compute real dynamic sentiment distribution from currently filtered posts
-  const sentimentStats = useMemo(() => {
-    const totalPosts = posts.length || 1;
-    const pos = posts.filter((p) => p.sentiment === "positive").length;
-    const neu = posts.filter((p) => p.sentiment === "neutral").length;
-    const neg = posts.filter((p) => p.sentiment === "negative").length;
-    const posPct = Math.round((pos / totalPosts) * 100);
-    const neuPct = Math.round((neu / totalPosts) * 100);
-    const negPct = Math.max(0, 100 - posPct - neuPct);
-    return {
-      positive: posPct,
-      neutral: neuPct,
-      negative: negPct,
-      total: posts.length,
-    };
-  }, [posts]);
   const [showSourceVolumeChart, setShowSourceVolumeChart] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState<string>("");
+  const [, setLastRefreshed] = useState<string>("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Mount state to prevent SSR/client hydration divergence
@@ -86,7 +79,13 @@ function ListeningContent() {
 
   useEffect(() => {
     setMounted(true);
-    setLastRefreshed(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    setLastRefreshed(
+      new Date().toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    );
   }, []);
 
   // Modals state
@@ -94,7 +93,7 @@ function ListeningContent() {
   const [activeCommentsPost, setActiveCommentsPost] = useState<Post | null>(null);
   const [activeSharePost, setActiveSharePost] = useState<Post | null>(null);
 
-  // Active view: Omni-channel feed vs GDELT News Intelligence
+  // Active view: Omni-channel feed vs GDELT News Intelligence (kept for legacy support)
   const [activeTab, setActiveTab] = useState<"omni" | "gdelt">("omni");
 
   // Auxiliary panels
@@ -105,7 +104,7 @@ function ListeningContent() {
   const [liveFetching, setLiveFetching] = useState(false);
   const [liveStatus, setLiveStatus] = useState<{ message: string; ok: boolean } | null>(null);
 
-  // Filters state
+  // Filters state (mix_sources on by default)
   const [filters, setFilters] = useState<PostsQuery>({
     query: searchParams.get("query") || undefined,
     platform: (searchParams.get("platform") as Platform) || undefined,
@@ -115,6 +114,7 @@ function ListeningContent() {
     is_relevant: searchParams.get("relevant_only") === "true" ? true : undefined,
     date_range: (searchParams.get("date_range") as any) || "30d",
     sort: (searchParams.get("sort") as any) || "recent",
+    mix_sources: true,
     page: 1,
     page_size: 20,
   });
@@ -127,27 +127,34 @@ function ListeningContent() {
       .then((res) => {
         setPosts(res.items);
         setTotal(res.total);
-        setLastRefreshed(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+        setLastRefreshed(
+          new Date().toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        );
       })
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
   };
 
+  // Unified Multi-Source Fetch Handler (Default Behaviour)
   const handleManualRefresh = async () => {
     setLoading(true);
     const q = filters.query || "Tata STRIVE";
     try {
-      // 1. Fire ultra-fast primary connectors first (YouTube, Google News, Bluesky)
+      // 1. Fire fast primary connectors (YouTube, Google News, Bluesky)
       await Promise.allSettled([
         api.searchYouTube(q, 15),
         api.searchGoogleNews(q, 15),
         api.searchBluesky(q, 15),
       ]);
-      // Update UI immediately (sub-1 second)
+
       fetchPosts();
       setLoading(false);
 
-      // 2. Auxiliary connectors run in the background without freezing the UI
+      // 2. Auxiliary connectors run in background without blocking UI
       Promise.allSettled([
         api.searchGdelt(q, "30d", 15),
         api.searchGooglePlaces(q, 10),
@@ -174,12 +181,11 @@ function ListeningContent() {
     if (query) {
       setLiveFetching(true);
       setLiveStatus({
-        message: `Querying live signals for "${query}" across YouTube, Google News & Bluesky...`,
+        message: `Querying live signals for "${query}" across connected sources...`,
         ok: true,
       });
 
       try {
-        // Fast primary burst (responds in 200-800ms)
         const [ytRes, bskyRes, gnewsRes] = await Promise.allSettled([
           api.searchYouTube(query, 20),
           api.searchBluesky(query, 20),
@@ -210,17 +216,19 @@ function ListeningContent() {
         if (gnewsCount > 0) counts.push(`${gnewsCount} Google News`);
         if (bskyCount > 0) counts.push(`${bskyCount} Bluesky`);
 
+        const totalNew = ytCount + bskyCount + gnewsCount;
         setLiveStatus({
-          message: counts.length > 0
-            ? `Retrieved ${counts.join(", ")} for "${query}". Loading background signals...`
-            : `Live search complete for "${query}".`,
+          message:
+            totalNew > 0
+              ? `Fetched ${totalNew} new posts (${counts.join(", ")}) for "${query}".`
+              : `Search complete for "${query}". All records synchronized.`,
           ok: true,
         });
 
         fetchPosts();
         setLiveFetching(false);
 
-        // Auxiliary background fetch without holding UI
+        // Auxiliary background fetch
         Promise.allSettled([
           api.searchGdelt(query, "30d", 20),
           api.searchGooglePlaces(query, 10),
@@ -250,7 +258,27 @@ function ListeningContent() {
     });
   };
 
-  // Strictly genuine 5 platforms
+  // ALL matching records for the current search and filters (not just 20 shown)
+  const allMatchingPosts = useMemo(() => {
+    if (!mounted) return [];
+    return store.queryPosts({
+      ...filters,
+      page: 1,
+      page_size: 10000,
+    }).items;
+  }, [mounted, filters, total]);
+
+  // Compute top 5 recurring topics strictly from real matching records
+  const computedTopics = useMemo(() => {
+    return computeTopTopics(allMatchingPosts, {
+      query: filters.query,
+      topic: filters.topic,
+    });
+  }, [allMatchingPosts, filters.query, filters.topic]);
+
+  const isSampleNeeded = total < 10;
+
+  // Genuine 5 platform distribution
   const sourceDistribution = useMemo(() => {
     const dist = [
       { source: "YouTube", count: 0, platform: "youtube" },
@@ -313,7 +341,7 @@ function ListeningContent() {
             topic: activeArticle.topic,
           }
         : undefined,
-      sample_data_status: "Live Verified Social Signals",
+      sample_data_status: isSampleNeeded ? "Sample baseline dataset" : "Live Verified Social Signals",
       key_records: posts.slice(0, 5).map((p) => ({
         id: p.id,
         platform: p.platform,
@@ -332,6 +360,7 @@ function ListeningContent() {
     filters,
     activeArticle,
     sourceCountsSummary,
+    isSampleNeeded,
     updatePageContext,
   ]);
 
@@ -354,7 +383,7 @@ function ListeningContent() {
 
   return (
     <>
-      <Topbar pageTitle="Social Listening" onRefresh={fetchPosts} />
+      <Topbar pageTitle="Social Listening" onRefresh={handleManualRefresh} />
 
       <main className="pt-20 px-4 md:px-8 pb-16 max-w-7xl mx-auto w-full space-y-6 animate-fade-in-up">
         {/* Real-time Radar Header matching Stitch */}
@@ -373,64 +402,66 @@ function ListeningContent() {
               Social Listening
             </h1>
             <p className="text-sm md:text-base text-[#3f4852] mt-1 max-w-2xl leading-relaxed">
-              Track real-time vocational chatter, community sentiment, and learner inquiries across YouTube, LinkedIn, Telegram, and regional forums.
+              Track real-time vocational chatter, community sentiment, and learner inquiries across YouTube, Bluesky, Google News, GDELT, and Google Places.
             </p>
 
-            {/* View Mode Toggle: Unified Feed vs GDELT Newsroom */}
-            <div className="flex items-center gap-1.5 bg-[#eaf5ff] p-1 rounded-full border border-[#0099f2]/15 w-fit mt-3">
-              <button
-                type="button"
-                onClick={() => setActiveTab("omni")}
-                className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === "omni"
-                    ? "bg-[#0099f2] text-white shadow-xs"
-                    : "text-[#3f4852] hover:text-[#001e2d]"
-                }`}
-              >
-                <Radio className="w-3.5 h-3.5" />
-                <span>Unified Feed</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab("gdelt")}
-                className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === "gdelt"
-                    ? "bg-[#0099f2] text-white shadow-xs"
-                    : "text-[#3f4852] hover:text-[#001e2d]"
-                }`}
-              >
-                <Newspaper className="w-3.5 h-3.5 text-amber-500" />
-                <span>GDELT Newsroom</span>
-                <span className="text-[9px] font-extrabold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">
-                  DOC 2.0
-                </span>
-              </button>
-            </div>
+            {/* Preserved Legacy Toggle (Kept in code behind flag) */}
+            {SHOW_LEGACY_CONTROLS && (
+              <div className="flex items-center gap-1.5 bg-[#eaf5ff] p-1 rounded-full border border-[#0099f2]/15 w-fit mt-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("omni")}
+                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                    activeTab === "omni"
+                      ? "bg-[#0099f2] text-white shadow-xs"
+                      : "text-[#3f4852] hover:text-[#001e2d]"
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>Unified Feed</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("gdelt")}
+                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                    activeTab === "gdelt"
+                      ? "bg-[#0099f2] text-white shadow-xs"
+                      : "text-[#3f4852] hover:text-[#001e2d]"
+                  }`}
+                >
+                  <Newspaper className="w-3.5 h-3.5 text-amber-500" />
+                  <span>GDELT Newsroom</span>
+                  <span className="text-[9px] font-extrabold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">
+                    DOC 2.0
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Header Action Controls */}
+          {/* Action buttons (Cleaned up: 4 legacy toolbar buttons removed from rendering) */}
           <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-            <button
-              onClick={handleManualRefresh}
-              disabled={loading || liveFetching}
-              className="stitch-btn-primary"
-              title="Re-query live source APIs"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading || liveFetching ? "animate-spin text-white" : ""}`} />
-              <span>Refresh Stream</span>
-            </button>
+            {SHOW_LEGACY_CONTROLS && (
+              <>
+                <button
+                  onClick={handleManualRefresh}
+                  disabled={loading || liveFetching}
+                  className="stitch-btn-primary"
+                  title="Re-query live source APIs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading || liveFetching ? "animate-spin text-white" : ""}`} />
+                  <span>Refresh Stream</span>
+                </button>
 
-            <button
-              onClick={() => setBskyOpen(!bskyOpen)}
-              className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-bold transition-all ${
-                bskyOpen
-                  ? "bg-[#00629e] text-white shadow-xs"
-                  : "bg-white text-[#00629e] shadow-azure-card hover:bg-[#eaf5ff]"
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Bluesky Stream</span>
-            </button>
+                <button
+                  onClick={() => setBskyOpen(!bskyOpen)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-bold bg-white text-[#00629e] shadow-azure-card hover:bg-[#eaf5ff]"
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Bluesky Stream</span>
+                </button>
+              </>
+            )}
 
             <button
               type="button"
@@ -438,7 +469,7 @@ function ListeningContent() {
                 setCsvOpen(!csvOpen);
                 if (bskyOpen) setBskyOpen(false);
               }}
-              className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-bold transition-all ${
+              className={`inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                 csvOpen
                   ? "bg-[#00629e] text-white shadow-xs"
                   : "bg-white text-[#00629e] shadow-azure-card hover:bg-[#eaf5ff]"
@@ -447,24 +478,6 @@ function ListeningContent() {
               <Upload className="w-3.5 h-3.5" />
               <span>Import CSV</span>
             </button>
-
-            {/* Layout switch */}
-            <div className="bg-white p-1 rounded-full shadow-azure-card flex text-xs">
-              <button
-                onClick={() => setViewMode("cards")}
-                className={`p-1.5 rounded-full transition-all ${viewMode === "cards" ? "bg-[#0099f2] text-white shadow-xs" : "text-[#3f4852] hover:text-[#001e2d]"}`}
-                title="Cards View"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setViewMode("table")}
-                className={`p-1.5 rounded-full transition-all ${viewMode === "table" ? "bg-[#0099f2] text-white shadow-xs" : "text-[#3f4852] hover:text-[#001e2d]"}`}
-                title="Table View"
-              >
-                <TableIcon className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
         </section>
 
@@ -478,15 +491,17 @@ function ListeningContent() {
           />
         ) : (
           <>
-            {/* Live Stream Collector Panel */}
-            <BlueskyCollector
-              isOpen={bskyOpen}
-              onToggle={() => setBskyOpen(!bskyOpen)}
-              onImportPosts={(newPosts) => {
-                api.collectPosts(newPosts);
-                fetchPosts();
-              }}
-            />
+            {/* Preserved Legacy Collector Panel (Kept behind flag) */}
+            {SHOW_LEGACY_COLLECTOR && (
+              <BlueskyCollector
+                isOpen={bskyOpen}
+                onToggle={() => setBskyOpen(!bskyOpen)}
+                onImportPosts={(newPosts) => {
+                  api.collectPosts(newPosts);
+                  fetchPosts();
+                }}
+              />
+            )}
 
             {/* Direct CSV Ingestion Panel */}
             <CsvUploadPanel
@@ -497,7 +512,9 @@ function ListeningContent() {
               }}
             />
 
-            {/* Compact Live Source Status Bar */}
+            {/* ================================================================= */}
+            {/* LAYOUT SECTION A: Active Data Connectors Bar (Unchanged)          */}
+            {/* ================================================================= */}
             <div className="bg-[#F8FAFC] rounded-xl px-4 py-2.5 border border-[#E2E8F0] flex flex-wrap items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2">
                 <Activity className="w-3.5 h-3.5 text-[#0067A5]" />
@@ -567,15 +584,162 @@ function ListeningContent() {
               </div>
             )}
 
-            {/* Platform Filter Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-none">
+            {/* ================================================================= */}
+            {/* LAYOUT SECTION B: Prominent Search Section Directly Below Connectors */}
+            {/* ================================================================= */}
+            <div className="bg-white rounded-2xl p-5 border border-[#E5E7EB] shadow-azure-card space-y-4">
+              <form onSubmit={handleSearchSubmit} className="flex flex-col lg:flex-row items-center gap-3">
+                {/* 56px height, 18px text, rounded-2xl search input */}
+                <div className="relative flex-1 w-full">
+                  <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-[#666666]" />
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Search live signals: skilling, apprenticeships, EV, solar, placements..."
+                    className="w-full h-14 pl-12 pr-4 rounded-2xl bg-[#F5F7F9] border border-[#E5E7EB] text-lg text-[#001e2d] placeholder:text-[#666666] focus:outline-none focus:border-[#0099f2] focus:bg-white transition-all shadow-inner"
+                  />
+                </div>
+
+                {/* Controls on the same row */}
+                <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto shrink-0 justify-between lg:justify-end">
+                  {/* Questions only checkbox */}
+                  <label className="flex items-center gap-2 text-xs font-semibold text-[#001e2d] cursor-pointer bg-[#F5F7F9] px-3.5 h-12 rounded-xl border border-[#E5E7EB] hover:bg-[#eaf5ff] transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={filters.is_question === true}
+                      onChange={(e) =>
+                        setFilters({
+                          ...filters,
+                          is_question: e.target.checked ? true : undefined,
+                          page: 1,
+                        })
+                      }
+                      className="rounded border-[#E5E7EB] text-[#0099f2] focus:ring-0 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Questions only</span>
+                  </label>
+
+                  {/* Sort dropdown */}
+                  <select
+                    value={filters.sort || "recent"}
+                    onChange={(e) =>
+                      setFilters({ ...filters, sort: e.target.value as any, page: 1 })
+                    }
+                    className="h-12 px-3 rounded-xl bg-[#F5F7F9] border border-[#E5E7EB] text-xs font-semibold text-[#001e2d] focus:outline-none focus:border-[#0099f2] cursor-pointer"
+                  >
+                    <option value="recent">Sort: Most Recent</option>
+                    <option value="engagement">Sort: Highest Engagement</option>
+                    <option value="rating">Sort: Highest Rating</option>
+                  </select>
+
+                  {/* Show dropdown */}
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#3f4852] bg-[#F5F7F9] px-3 h-12 rounded-xl border border-[#E5E7EB]">
+                    <span>Show:</span>
+                    <select
+                      value={filters.page_size || 20}
+                      onChange={(e) =>
+                        setFilters({ ...filters, page_size: parseInt(e.target.value, 10), page: 1 })
+                      }
+                      className="bg-transparent text-xs font-bold text-[#001e2d] focus:outline-none cursor-pointer"
+                    >
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                  </div>
+
+                  {/* Large Search button */}
+                  <button
+                    type="submit"
+                    disabled={liveFetching}
+                    className="h-12 px-6 rounded-xl bg-[#0099f2] hover:bg-[#0080cc] text-white text-sm font-bold shadow-azure-card hover:shadow-azure-hover transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 whitespace-nowrap"
+                  >
+                    {liveFetching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Searching...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4 text-white" />
+                        <span>Search</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+
+              {/* Quick Keywords for Topic Exploration */}
+              <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-[#E5E7EB] text-xs">
+                <span className="font-bold text-[#00629e] flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#0099f2]" />
+                  Query Topics:
+                </span>
+                {[
+                  "Tata STRIVE",
+                  "skilling",
+                  "employability",
+                  "vocational training",
+                  "apprenticeships",
+                  "solar technician",
+                  "practical AI skills",
+                  "EV technician",
+                ].map((keyword) => (
+                  <button
+                    key={keyword}
+                    type="button"
+                    onClick={() => {
+                      setSearchInput(keyword);
+                      handleSearchSubmit(undefined, keyword);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-[#eaf5ff] hover:bg-[#def0ff] text-[#00629e] text-[11px] font-bold border border-[#0099f2]/20 transition-all cursor-pointer"
+                  >
+                    + {keyword}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Fetch Feedback Toast */}
+            {liveStatus && (
+              <div
+                className={`p-3.5 rounded-xl text-xs font-semibold flex items-center justify-between border shadow-2xs ${
+                  liveStatus.ok
+                    ? "bg-[#eaf5ff] text-[#00629e] border-[#0099f2]/30"
+                    : "bg-red-50 text-red-800 border-red-200"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  {liveStatus.ok ? (
+                    <CheckCircle2 className="w-4 h-4 text-[#0099f2] shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  )}
+                  <span>{liveStatus.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLiveStatus(null)}
+                  className="text-[11px] font-bold text-[#00629e] hover:underline cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* ================================================================= */}
+            {/* LAYOUT SECTION C: Source Tabs With Live Counts                   */}
+            {/* ================================================================= */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
               <button
                 type="button"
                 onClick={() => setFilters({ ...filters, platform: undefined, page: 1 })}
-                className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-3.5 py-2 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer ${
                   !filters.platform
-                    ? "bg-[#0067A5] text-white shadow-2xs"
-                    : "bg-white text-[#666666] border border-[#E5E7EB] hover:bg-[#DCEFF7] hover:text-[#0067A5]"
+                    ? "bg-[#0099f2] text-white shadow-azure-card"
+                    : "bg-white text-[#3f4852] border border-[#E5E7EB] hover:bg-[#eaf5ff] hover:text-[#0099f2]"
                 }`}
               >
                 All Sources {mounted ? `(${sourceDistribution.reduce((acc, s) => acc + s.count, 0)})` : ""}
@@ -593,19 +757,19 @@ function ListeningContent() {
                         page: 1,
                       })
                     }
-                    className={`px-2.5 py-1.5 rounded-lg font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                    className={`px-3 py-2 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
                       isActive
-                        ? "bg-[#0067A5] text-white shadow-2xs"
-                        : "bg-white text-[#666666] border border-[#E5E7EB] hover:bg-[#DCEFF7] hover:text-[#0067A5]"
+                        ? "bg-[#0099f2] text-white shadow-azure-card"
+                        : "bg-white text-[#3f4852] border border-[#E5E7EB] hover:bg-[#eaf5ff] hover:text-[#0099f2]"
                     }`}
                   >
                     <span>{src.source}</span>
                     {mounted && (
                       <span
-                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
                           isActive
                             ? "bg-white/20 text-white"
-                            : "bg-[#F5F7F9] text-[#0067A5]"
+                            : "bg-[#eaf5ff] text-[#0099f2]"
                         }`}
                       >
                         {src.count}
@@ -616,7 +780,9 @@ function ListeningContent() {
               })}
             </div>
 
-            {/* Global Filter Bar */}
+            {/* ================================================================= */}
+            {/* LAYOUT SECTION D: Filters Row With "Showing N records"            */}
+            {/* ================================================================= */}
             <FilterBar
               filters={filters}
               onChange={setFilters}
@@ -628,163 +794,379 @@ function ListeningContent() {
               totalResults={total}
             />
 
-            {/* Search & Sort Bar */}
-            <div className="bg-white rounded-xl p-3.5 border border-[#E5E7EB] shadow-xs space-y-3 text-xs">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                <form onSubmit={handleSearchSubmit} className="relative w-full sm:w-96 flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[#666666]" />
-                    <input
-                      type="text"
-                      value={searchInput}
-                      onChange={(e) => setSearchInput(e.target.value)}
-                      placeholder="Search live signals: skilling, apprenticeships, EV..."
-                      className="w-full h-8 pl-8 pr-3 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] text-xs text-[#252525] placeholder:text-[#666666] focus:outline-none focus:border-[#0067A5]"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={liveFetching}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0067A5] text-white text-xs font-semibold hover:bg-[#005588] transition-colors disabled:opacity-70 whitespace-nowrap flex-shrink-0 cursor-pointer"
-                  >
-                    {liveFetching ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                        <span>Searching...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Search className="w-3.5 h-3.5 text-white" />
-                        <span>Search</span>
-                      </>
-                    )}
-                  </button>
-                </form>
-
-                <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                  <label className="flex items-center gap-1.5 text-xs text-[#252525] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={filters.is_question === true}
-                      onChange={(e) =>
-                        setFilters({
-                          ...filters,
-                          is_question: e.target.checked ? true : undefined,
-                          page: 1,
-                        })
-                      }
-                      className="rounded border-[#E5E7EB] text-[#0067A5] focus:ring-0"
-                    />
-                    <span className="font-medium">Questions only</span>
-                  </label>
-
-                  <select
-                    value={filters.sort || "recent"}
-                    onChange={(e) =>
-                      setFilters({ ...filters, sort: e.target.value as any, page: 1 })
-                    }
-                    className="h-8 px-2.5 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] text-xs text-[#252525] focus:outline-none focus:border-[#0067A5] cursor-pointer"
-                  >
-                    <option value="recent">Sort: Most Recent</option>
-                    <option value="engagement">Sort: Highest Engagement</option>
-                    <option value="rating">Sort: Highest Rating</option>
-                  </select>
-
-                  <div className="flex items-center gap-1.5 text-xs text-[#666666]">
-                    <span>Show:</span>
-                    <select
-                      value={filters.page_size || 20}
-                      onChange={(e) =>
-                        setFilters({ ...filters, page_size: parseInt(e.target.value, 10), page: 1 })
-                      }
-                      className="h-8 px-2 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] text-xs text-[#252525] focus:outline-none focus:border-[#0067A5] cursor-pointer font-medium"
-                    >
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Keywords for Topic Exploration */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#E5E7EB] text-[11px] text-[#666666]">
-                <span className="font-semibold text-[#0067A5] flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-[#0067A5]" />
-                  Query Topics:
-                </span>
-                {[
-                  "Tata STRIVE",
-                  "skilling",
-                  "employability",
-                  "vocational training",
-                  "apprenticeships",
-                  "solar technician",
-                  "practical AI skills",
-                ].map((keyword) => (
-                  <button
-                    key={keyword}
-                    type="button"
-                    onClick={() => {
-                      setSearchInput(keyword);
-                      handleSearchSubmit(undefined, keyword);
-                    }}
-                    className="px-2 py-0.5 rounded-md bg-[#DCEFF7] text-[#0067A5] border border-[#008FD3]/30 hover:bg-[#c8e6f3] transition-colors font-medium cursor-pointer"
-                  >
-                    + {keyword}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Live Fetch Feedback Banner */}
-            {liveStatus && (
-              <div
-                className={`px-4 py-2 rounded-xl text-xs flex items-center justify-between border ${
-                  liveStatus.ok
-                    ? "bg-[#DCEFF7]/70 text-[#0067A5] border-[#008FD3]/30"
-                    : "bg-red-50 text-red-800 border-red-200"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {liveStatus.ok ? (
-                    <CheckCircle2 className="w-4 h-4 text-[#0067A5] flex-shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                  )}
-                  <span className="font-semibold">Live Signals:</span>
-                  <span>{liveStatus.message}</span>
-                </div>
-                <button
-                  onClick={() => setLiveStatus(null)}
-                  className="text-[11px] font-semibold text-[#0067A5] hover:underline cursor-pointer"
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
-
-            {/* Content Display: Cards vs Table */}
+            {/* ================================================================= */}
+            {/* LAYOUT SECTION E: Posts List & Right Sidebar                      */}
+            {/* ================================================================= */}
             {loading ? (
               <div className="py-20 flex flex-col items-center justify-center text-[#666666] gap-2">
-                <Loader2 className="w-6 h-6 animate-spin text-[#0067A5]" />
-                <span className="text-xs">Streaming social conversations...</span>
+                <Loader2 className="w-8 h-8 animate-spin text-[#0099f2]" />
+                <span className="text-xs font-semibold text-[#001e2d]">Streaming social conversations...</span>
               </div>
             ) : posts.length === 0 ? (
-              <div className="bg-white rounded-xl p-12 border border-[#E5E7EB] text-center space-y-2">
-                <h3 className="text-sm font-semibold text-[#252525]">
+              <div className="bg-white rounded-2xl p-12 border border-[#E5E7EB] text-center space-y-2">
+                <h3 className="text-sm font-bold text-[#001e2d]">
                   No records found matching active filters
                 </h3>
-                <p className="text-xs text-[#666666] max-w-md mx-auto">
+                <p className="text-xs text-[#3f4852] max-w-md mx-auto">
                   Try searching for &quot;Tata STRIVE&quot;, &quot;skilling&quot;, or &quot;vocational training&quot;, or click Refresh above to fetch live signals.
                 </p>
               </div>
-            ) : viewMode === "cards" ? (
+            ) : (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                {/* Left Stream: col-span-8 */}
+                {/* Left Stream: Posts List (col-span-8) */}
                 <div className="lg:col-span-8 space-y-4">
-                  {/* YouTube Community Comment Analysis Card for searched topic */}
+                  {/* Stream Controls Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base font-bold text-[#001e2d]">Live Community Stream</span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-[#def0ff] text-[#0099f2] text-xs font-bold">
+                        {posts.length} signals displayed
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {/* Mix Sources Toggle (Round-robin interleaving) */}
+                      {!filters.platform && (
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-[#001e2d]">
+                          <input
+                            type="checkbox"
+                            checked={mixSources}
+                            onChange={(e) => {
+                              setMixSources(e.target.checked);
+                              setFilters((prev) => ({
+                                ...prev,
+                                mix_sources: e.target.checked,
+                                page: 1,
+                              }));
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#0099f2] relative"></div>
+                          <span className="text-[11px] text-[#3f4852]">Mix sources</span>
+                        </label>
+                      )}
+
+                      {/* Layout Switch (Cards vs Table) */}
+                      <div className="bg-white p-1 rounded-full shadow-azure-card flex text-xs border border-[#E5E7EB]">
+                        <button
+                          onClick={() => setViewMode("cards")}
+                          className={`p-1.5 rounded-full transition-all cursor-pointer ${
+                            viewMode === "cards" ? "bg-[#0099f2] text-white shadow-xs" : "text-[#3f4852] hover:text-[#001e2d]"
+                          }`}
+                          title="Cards View"
+                        >
+                          <LayoutGrid className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setViewMode("table")}
+                          className={`p-1.5 rounded-full transition-all cursor-pointer ${
+                            viewMode === "table" ? "bg-[#0099f2] text-white shadow-xs" : "text-[#3f4852] hover:text-[#001e2d]"
+                          }`}
+                          title="Table View"
+                        >
+                          <TableIcon className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cards View */}
+                  {viewMode === "cards" ? (
+                    <div className="space-y-4">
+                      {posts.map((post) => (
+                        <PostCard
+                          key={post.id}
+                          post={post}
+                          onReadInPage={(p) => setActiveArticle(p)}
+                          onViewComments={(p) => setActiveCommentsPost(p)}
+                          onShare={(p) => setActiveSharePost(p)}
+                          onAnalyzeWithAI={(p) => setActiveArticle(p)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    /* Table View */
+                    <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-xs overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-[#F5F7F9] border-b border-[#E5E7EB] text-[#666666] font-semibold">
+                              <th className="py-3 px-4">Source</th>
+                              <th className="py-3 px-4">Headline / Content</th>
+                              <th className="py-3 px-4">Topic</th>
+                              <th className="py-3 px-4">Sentiment</th>
+                              <th className="py-3 px-4">Metric / Status</th>
+                              <th className="py-3 px-4">Date</th>
+                              <th className="py-3 px-4 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#E5E7EB] text-[#252525]">
+                            {posts.map((post) => (
+                              <tr key={post.id} className="hover:bg-[#F8FAFC] transition-colors">
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <div className="flex items-center gap-1.5">
+                                    {getPlatformBadge(post.platform)}
+                                    {post.is_question && (
+                                      <span className="p-0.5 text-[#0067A5]" title="Question Detected">
+                                        <HelpCircle className="w-3.5 h-3.5" />
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 max-w-md">
+                                  {post.article_title && (
+                                    <span className="font-bold text-[#252525] block truncate mb-0.5">
+                                      {post.article_title}
+                                    </span>
+                                  )}
+                                  <p className="text-[#4B5563] leading-relaxed line-clamp-2">
+                                    {post.content}
+                                  </p>
+                                  <span className="text-[10px] text-[#666666] block mt-0.5">
+                                    by {post.domain || post.author_handle}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded bg-[#DCEFF7] text-[#0067A5] text-[10px] font-semibold border border-[#008FD3]/20">
+                                    {post.topic}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize border ${
+                                      post.sentiment === "positive"
+                                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                        : post.sentiment === "negative"
+                                        ? "bg-red-50 text-red-800 border-red-200"
+                                        : "bg-gray-50 text-gray-700 border-gray-200"
+                                    }`}
+                                  >
+                                    {post.sentiment}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap tabular-nums text-[11px] text-[#666666]">
+                                  {post.rating ? (
+                                    <span className="font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                      {post.rating} / 5 ★
+                                    </span>
+                                  ) : post.platform === "youtube" ? (
+                                    <div className="flex items-center gap-2">
+                                      {post.likes !== undefined && <span>{post.likes} likes</span>}
+                                      {post.comments !== undefined && <span>{post.comments} comments</span>}
+                                    </div>
+                                  ) : post.platform === "bluesky" ? (
+                                    <div className="flex items-center gap-2">
+                                      {post.likes ? <span>{post.likes} likes</span> : null}
+                                      {post.comments ? <span>{post.comments} replies</span> : null}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] italic text-[#666666]">Press wire</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 whitespace-nowrap text-[#666666] text-[11px]">
+                                  {post.posted_at.slice(0, 10)}
+                                </td>
+                                <td className="py-3 px-4 text-right whitespace-nowrap">
+                                  <div className="inline-flex items-center justify-end gap-1.5">
+                                    {post.platform === "youtube" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveCommentsPost(post)}
+                                        className="text-[11px] font-semibold text-[#0067A5] hover:text-[#005588] bg-[#DCEFF7] hover:bg-[#cbe6f3] px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
+                                      >
+                                        <MessageCircle className="w-3 h-3" />
+                                        <span>Comments</span>
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyLink(post.url, post.id)}
+                                      className="text-[11px] font-semibold text-[#666666] hover:text-[#252525] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
+                                      title="Copy content URL"
+                                    >
+                                      {copiedId === post.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                                      <span>{copiedId === post.id ? "Copied" : "Copy"}</span>
+                                    </button>
+
+                                    {post.url && (
+                                      <a
+                                        href={post.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs font-semibold text-[#0067A5] hover:text-[#005588] hover:underline inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#F5F7F9] hover:bg-[#DCEFF7] border border-[#E5E7EB] transition-colors"
+                                      >
+                                        <span>Open</span>
+                                        <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pagination Controls */}
+                  {total > (filters.page_size || 20) && (
+                    <div className="flex items-center justify-between pt-2 text-xs text-[#666666]">
+                      <span>
+                        Showing {(filters.page! - 1) * filters.page_size! + 1} to{" "}
+                        {Math.min(filters.page! * filters.page_size!, total)} of {total} records
+                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={filters.page === 1}
+                          onClick={() => setFilters({ ...filters, page: filters.page! - 1 })}
+                          className="px-2.5 py-1 rounded border border-[#E5E7EB] bg-white text-[#252525] hover:bg-[#DCEFF7] disabled:opacity-50 transition-colors cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-semibold text-[#0067A5]">Page {filters.page}</span>
+                        <button
+                          disabled={filters.page! * filters.page_size! >= total}
+                          onClick={() => setFilters({ ...filters, page: filters.page! + 1 })}
+                          className="px-2.5 py-1 rounded border border-[#E5E7EB] bg-white text-[#252525] hover:bg-[#DCEFF7] disabled:opacity-50 transition-colors cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Sidebar: Topics, In-Depth Sentiment, and YouTube Analyzer (col-span-4) */}
+                <div className="lg:col-span-4 space-y-6">
+                  {/* 1. What people are talking about (Real Computed Topics) */}
+                  <div className="stitch-card p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-bold text-[#001e2d]">
+                        What people are talking about
+                      </h2>
+                      <span className="material-symbols-outlined text-[#0099f2] text-[20px]">trending_up</span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-[#3f4852]">
+                        Top 5 recurring skilling topics computed from last 7 days volume.
+                      </p>
+                      {isSampleNeeded && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                          Sample data
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {isSampleNeeded ? (
+                        SAMPLE_TRENDING_TOPICS.map((topicItem: any, idx: number) => {
+                          const name = (topicItem.tag || topicItem.name || "").replace(/^#/, "");
+                          const mentionsStr = formatCount(topicItem.mentions);
+                          const growthStr = formatChange(topicItem.growth);
+
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => {
+                                setSearchInput(name);
+                                handleSearchSubmit(undefined, name);
+                              }}
+                              className="p-3 rounded-xl bg-[#eaf5ff] hover:bg-[#def0ff] transition-colors cursor-pointer group"
+                            >
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <span className="text-xs font-bold text-[#0099f2] group-hover:underline truncate">
+                                  #{name}
+                                </span>
+                                {growthStr && (
+                                  <span className="chip-growing">
+                                    <TrendingUp className="w-3 h-3" />
+                                    {growthStr}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] text-[#3f4852]">
+                                <span>{mentionsStr}</span>
+                                {topicItem.region && <span className="font-semibold text-[#001e2d]">{topicItem.region}</span>}
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : computedTopics.length === 0 ? (
+                        <p className="text-xs text-gray-500 italic py-2">No topic clusters detected for current filters.</p>
+                      ) : (
+                        computedTopics.map((topicItem, idx) => (
+                          <div
+                            key={topicItem.id || idx}
+                            onClick={() => {
+                              setFilters({
+                                ...filters,
+                                topic: topicItem.name,
+                                page: 1,
+                              });
+                            }}
+                            className={`p-3 rounded-xl transition-all cursor-pointer group ${
+                              filters.topic === topicItem.name
+                                ? "bg-[#0099f2] text-white shadow-xs"
+                                : "bg-[#eaf5ff] hover:bg-[#def0ff] text-[#001e2d]"
+                            }`}
+                            title={`Click to filter feed by ${topicItem.name}`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span
+                                className={`text-xs font-bold truncate group-hover:underline ${
+                                  filters.topic === topicItem.name ? "text-white" : "text-[#0099f2]"
+                                }`}
+                              >
+                                #{topicItem.name}
+                              </span>
+                              {topicItem.growth_label && (
+                                <span
+                                  className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                    filters.topic === topicItem.name
+                                      ? "bg-white/20 text-white"
+                                      : topicItem.is_new
+                                      ? "bg-purple-100 text-purple-800"
+                                      : "bg-emerald-100 text-emerald-800"
+                                  }`}
+                                >
+                                  {!topicItem.is_new && <TrendingUp className="w-2.5 h-2.5" />}
+                                  {topicItem.growth_label}
+                                </span>
+                              )}
+                            </div>
+                            <div
+                              className={`flex items-center justify-between text-[11px] ${
+                                filters.topic === topicItem.name ? "text-white/80" : "text-[#3f4852]"
+                              }`}
+                            >
+                              <span>{formatCount(topicItem.post_count)}</span>
+                              <span
+                                className={`font-semibold ${
+                                  filters.topic === topicItem.name ? "text-white" : "text-[#001e2d]"
+                                }`}
+                              >
+                                {topicItem.location_or_source}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2. In-Depth Sentiment Analysis Card based on ALL matching records */}
+                  <SentimentBreakdownCard
+                    posts={allMatchingPosts}
+                    loading={loading}
+                    searchQuery={filters.query}
+                    dateRange={filters.date_range}
+                  />
+
+                  {/* 3. YouTube Community Comment Analysis Card (Moved to Sidebar) */}
                   <YoutubeCommentAnalysisCard
                     topic={filters.query || "Tata STRIVE"}
                     onSelectQuestion={(q) => {
@@ -792,297 +1174,6 @@ function ListeningContent() {
                       handleSearchSubmit(undefined, q);
                     }}
                   />
-
-                  <div className="flex items-center justify-between px-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-base font-bold text-[#001e2d]">Live Community Stream</span>
-                      <span className="px-2.5 py-0.5 rounded-full bg-[#def0ff] text-[#0099f2] text-xs font-bold">
-                        {posts.length} signals displayed
-                      </span>
-                    </div>
-                    <span className="text-xs text-[#3f4852] font-semibold">
-                      Showing {posts.length} of {total} mentions
-                    </span>
-                  </div>
-
-                  <div className="space-y-4">
-                    {posts.map((post) => (
-                      <PostCard
-                        key={post.id}
-                        post={post}
-                        onReadInPage={(p) => setActiveArticle(p)}
-                        onViewComments={(p) => setActiveCommentsPost(p)}
-                        onShare={(p) => setActiveSharePost(p)}
-                        onAnalyzeWithAI={(p) => setActiveArticle(p)}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Right Column: Trending Topics & Sentiment Breakdown (col-span-4) */}
-                <div className="lg:col-span-4 space-y-6">
-                  {/* Recurring Topics Card computed from real 7-day mentions */}
-                  <div className="stitch-card p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-base font-bold text-[#001e2d]">
-                        What people are talking about
-                      </h2>
-                      <span className="material-symbols-outlined text-[#0099f2] text-[20px]">trending_up</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-[#3f4852]">
-                        Top 5 recurring skilling topics computed from last 7 days volume.
-                      </p>
-                      {trendingTopics.length === 0 && (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
-                          Sample data
-                        </span>
-                      )}
-                    </div>
-                    <div className="space-y-3.5">
-                      {(trendingTopics.length > 0 ? trendingTopics : SAMPLE_TRENDING_TOPICS).slice(0, 5).map((topicItem: any, idx: number) => {
-                        const name = topicItem.name || topicItem.topic;
-                        const mentions = topicItem.post_count || topicItem.mentions || topicItem.current_weekly_mentions || 0;
-                        const growth = topicItem.growth_pct || topicItem.growth || 0;
-                        const region = topicItem.region; // Only if region explicitly exists
-
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => {
-                              setSearchInput(name);
-                              handleSearchSubmit(undefined, name);
-                            }}
-                            className="p-3.5 rounded-xl bg-[#eaf5ff] hover:bg-[#def0ff] transition-colors cursor-pointer group"
-                          >
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <span className="text-xs font-bold text-[#0099f2] group-hover:underline truncate">
-                                #{name}
-                              </span>
-                              <span className="chip-growing">
-                                <TrendingUp className="w-3 h-3" />
-                                +{Math.abs(growth)}%
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between text-[11px] text-[#3f4852]">
-                              <span>{mentions.toLocaleString()} mentions</span>
-                              {region && <span className="font-semibold text-[#001e2d]">{region}</span>}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Sentiment Distribution Card from filtered posts */}
-                  <div className="stitch-card p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-base font-bold text-[#001e2d]">Sentiment Distribution</h3>
-                      <span className="text-[11px] text-[#3f4852] font-semibold">N={sentimentStats.total} filtered</span>
-                    </div>
-                    <div className="space-y-3">
-                      <div>
-                        <div className="flex items-center justify-between text-xs font-bold mb-1">
-                          <span className="text-[#1e9e6a]">Positive Sentiment</span>
-                          <span>{sentimentStats.positive}%</span>
-                        </div>
-                        <div className="w-full bg-[#eaf5ff] h-2 rounded-full overflow-hidden">
-                          <div
-                            className="bg-[#1e9e6a] h-full rounded-full transition-all duration-500"
-                            style={{ width: `${sentimentStats.positive}%` }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between text-xs font-bold mb-1">
-                          <span className="text-[#6b7a90]">Neutral Queries</span>
-                          <span>{sentimentStats.neutral}%</span>
-                        </div>
-                        <div className="w-full bg-[#eaf5ff] h-2 rounded-full overflow-hidden">
-                          <div
-                            className="bg-[#6b7a90] h-full rounded-full transition-all duration-500"
-                            style={{ width: `${sentimentStats.neutral}%` }}
-                          ></div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between text-xs font-bold mb-1">
-                          <span className="text-[#d64545]">Needs Attention</span>
-                          <span>{sentimentStats.negative}%</span>
-                        </div>
-                        <div className="w-full bg-[#eaf5ff] h-2 rounded-full overflow-hidden">
-                          <div
-                            className="bg-[#d64545] h-full rounded-full transition-all duration-500"
-                            style={{ width: `${sentimentStats.negative}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-[#E5E7EB] shadow-xs overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-[#F5F7F9] border-b border-[#E5E7EB] text-[#666666] font-semibold">
-                        <th className="py-3 px-4">Source</th>
-                        <th className="py-3 px-4">Headline / Content</th>
-                        <th className="py-3 px-4">Topic</th>
-                        <th className="py-3 px-4">Sentiment</th>
-                        <th className="py-3 px-4">Metric / Status</th>
-                        <th className="py-3 px-4">Date</th>
-                        <th className="py-3 px-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#E5E7EB] text-[#252525]">
-                      {posts.map((post) => (
-                        <tr key={post.id} className="hover:bg-[#F8FAFC] transition-colors">
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <div className="flex items-center gap-1.5">
-                              {getPlatformBadge(post.platform)}
-                              {post.is_question && (
-                                <span className="p-0.5 text-[#0067A5]" title="Question Detected">
-                                  <HelpCircle className="w-3.5 h-3.5" />
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 max-w-md">
-                            {post.article_title && (
-                              <span className="font-bold text-[#252525] block truncate mb-0.5">
-                                {post.article_title}
-                              </span>
-                            )}
-                            <p className="text-[#4B5563] leading-relaxed line-clamp-2">
-                              {post.content}
-                            </p>
-                            <span className="text-[10px] text-[#666666] block mt-0.5">
-                              by {post.domain || post.author_handle}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded bg-[#DCEFF7] text-[#0067A5] text-[10px] font-semibold border border-[#008FD3]/20">
-                              {post.topic}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize border ${
-                                post.sentiment === "positive"
-                                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                  : post.sentiment === "negative"
-                                  ? "bg-red-50 text-red-800 border-red-200"
-                                  : "bg-gray-50 text-gray-700 border-gray-200"
-                              }`}
-                            >
-                              {post.sentiment}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap tabular-nums text-[11px] text-[#666666]">
-                            {post.rating ? (
-                              <span className="font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                {post.rating} / 5 ★
-                              </span>
-                            ) : post.platform === "youtube" ? (
-                              <div className="flex items-center gap-2">
-                                {post.likes !== undefined && <span>{post.likes} likes</span>}
-                                {post.comments !== undefined && <span>{post.comments} comments</span>}
-                              </div>
-                            ) : post.platform === "bluesky" ? (
-                              <div className="flex items-center gap-2">
-                                {post.likes ? <span>{post.likes} likes</span> : null}
-                                {post.comments ? <span>{post.comments} replies</span> : null}
-                              </div>
-                            ) : (
-                              <span className="text-[10px] italic text-[#666666]">Press wire</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap text-[#666666] text-[11px]">
-                            {post.posted_at.slice(0, 10)}
-                          </td>
-                          <td className="py-3 px-4 text-right whitespace-nowrap">
-                            <div className="inline-flex items-center justify-end gap-1.5">
-                              {post.platform === "youtube" && (
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveCommentsPost(post)}
-                                  className="text-[11px] font-semibold text-[#0067A5] hover:text-[#005588] bg-[#DCEFF7] hover:bg-[#cbe6f3] px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
-                                >
-                                  <MessageCircle className="w-3 h-3" />
-                                  <span>Comments</span>
-                                </button>
-                              )}
-
-                              {(post.platform === "gdelt" || post.platform === "google_news") && (
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveArticle(post)}
-                                  className="text-[11px] font-semibold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
-                                >
-                                  <Sparkles className="w-3 h-3 text-purple-600" />
-                                  <span>AI Analysis</span>
-                                </button>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => handleCopyLink(post.url, post.id)}
-                                className="text-[11px] font-semibold text-[#666666] hover:text-[#252525] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors cursor-pointer inline-flex items-center gap-1"
-                                title="Copy content URL"
-                              >
-                                {copiedId === post.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                                <span>{copiedId === post.id ? "Copied" : "Copy"}</span>
-                              </button>
-
-                              {post.url && (
-                                <a
-                                  href={post.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs font-semibold text-[#0067A5] hover:text-[#005588] hover:underline inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#F5F7F9] hover:bg-[#DCEFF7] border border-[#E5E7EB] transition-colors"
-                                >
-                                  <span>Open</span>
-                                  <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Pagination Controls */}
-            {total > (filters.page_size || 20) && (
-              <div className="flex items-center justify-between pt-2 text-xs text-[#666666]">
-                <span>
-                  Showing {(filters.page! - 1) * filters.page_size! + 1} to{" "}
-                  {Math.min(filters.page! * filters.page_size!, total)} of {total} records
-                </span>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={filters.page === 1}
-                    onClick={() => setFilters({ ...filters, page: filters.page! - 1 })}
-                    className="px-2.5 py-1 rounded border border-[#E5E7EB] bg-white text-[#252525] hover:bg-[#DCEFF7] disabled:opacity-50 transition-colors cursor-pointer"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-                  <span className="font-semibold text-[#0067A5]">Page {filters.page}</span>
-                  <button
-                    disabled={filters.page! * filters.page_size! >= total}
-                    onClick={() => setFilters({ ...filters, page: filters.page! + 1 })}
-                    className="px-2.5 py-1 rounded border border-[#E5E7EB] bg-white text-[#252525] hover:bg-[#DCEFF7] disabled:opacity-50 transition-colors cursor-pointer"
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
             )}
