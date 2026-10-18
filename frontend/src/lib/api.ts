@@ -13,6 +13,8 @@ import {
   GdeltNewsResponse,
   OfficialImpactResponse,
   AppSettings,
+  StudioEvidencePack,
+  StudioSuggestionsResponse,
 } from "../types";
 import { store } from "./data-store";
 import { fetchYouTubePosts } from "./youtube";
@@ -453,6 +455,28 @@ export const api = {
     } catch (err: any) {
       throw new Error(err.message || "Campaign generation failed. Check backend connection.");
     }
+  },
+
+  getStudioEvidencePack: async (topic: string): Promise<StudioEvidencePack> => {
+    const res = await fetch(`/api/studio/evidence-pack?topic=${encodeURIComponent(topic)}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.message || `Failed to fetch evidence pack (HTTP ${res.status})`);
+    }
+    return await res.json();
+  },
+
+  getStudioSuggestions: async (): Promise<StudioSuggestionsResponse> => {
+    const res = await fetch("/api/studio/suggestions", { cache: "no-store" });
+    if (!res.ok) {
+      return {
+        taxonomy_topics: [],
+        strive_programmes: [],
+      };
+    }
+    return await res.json();
   },
 
   importCsv: async (file: File): Promise<{ added: number; error?: string }> => {

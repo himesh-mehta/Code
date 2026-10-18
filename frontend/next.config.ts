@@ -67,6 +67,10 @@ const nextConfig: NextConfig = {
         source: "/api/ai/:path*",
         destination: "http://127.0.0.1:8000/api/ai/:path*",
       },
+      {
+        source: "/api/studio/:path*",
+        destination: "http://127.0.0.1:8000/api/studio/:path*",
+      },
     ];
   },
 };

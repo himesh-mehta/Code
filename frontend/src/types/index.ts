@@ -307,3 +307,62 @@ export interface GdeltNewsResponse {
   source: "gdelt";
 }
 
+export interface StudioEvidencePack {
+  topic: string;
+  is_off_topic: boolean;
+  has_live_data: boolean;
+  post_count: number;
+  snapshot: {
+    mentions_7d: number;
+    mentions_prev_7d: number;
+    change_pct: number | null;
+    is_new: boolean;
+    status: "Growing" | "Steady" | "Cooling";
+    updated_at: string;
+  } | null;
+  what_people_are_saying: {
+    positive: number;
+    neutral: number;
+    negative: number;
+    positive_pct: number;
+    neutral_pct: number;
+    negative_pct: number;
+    top_themes: string[];
+  } | null;
+  questions: Array<{
+    id: string;
+    text: string;
+    source: string;
+    author: string;
+    url: string;
+    published_at: string;
+  }>;
+  matching_programme: {
+    name: string;
+    description: string;
+    url: string;
+  } | null;
+  best_time_to_post: {
+    windows: string[];
+    sentence: string;
+  } | null;
+  top_posts: Array<{
+    title: string;
+    url: string;
+    source: string;
+    author: string;
+    likes: number;
+  }>;
+  evidence_context_for_ai: any;
+}
+
+export interface StudioSuggestionsResponse {
+  taxonomy_topics: string[];
+  strive_programmes: Array<{
+    name: string;
+    category: string;
+    source: string;
+  }>;
+}
+
+

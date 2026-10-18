@@ -25,6 +25,7 @@ from .trends.collector import (
     backfill_history_if_needed,
 )
 from .impact_service import get_official_impact
+from .studio_service import get_studio_evidence_pack, get_studio_suggestions
 from .db import (
     get_db_connection,
     get_posts,
@@ -1170,4 +1171,28 @@ def get_sources_health_endpoint():
             }
         ]
     }
+
+
+# --- 11. /api/studio/evidence-pack & /api/studio/suggestions ---
+
+@router.get("/studio/evidence-pack")
+async def get_studio_evidence_pack_endpoint(topic: str = Query(default="Employability and job readiness")):
+    """
+    Returns authentic evidence pack for Content Studio:
+    - 30-min cache
+    - Stored posts + live queries (YouTube, Bluesky, Google News)
+    - Mentions delta, sentiment, questions, matching Tata STRIVE course, best time to post, and facts for AI.
+    """
+    return await get_studio_evidence_pack(topic)
+
+
+@router.get("/studio/suggestions")
+def get_studio_suggestions_endpoint():
+    """
+    Returns topic suggestions for Content Studio combobox:
+    - Canonical taxonomy topics
+    - Tata STRIVE programmes from verified tatastrive.com catalog
+    """
+    return get_studio_suggestions()
+
 
