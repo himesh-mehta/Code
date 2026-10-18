@@ -89,8 +89,47 @@ def analyze_batch(req: BatchAnalyzeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch inference error: {str(e)}")
 
+# Pulse AI Assistant Endpoints
+from .assistant import ChatRequest, ChatResponse, process_chat, get_engine_config
+
+@app.get("/api/assistant/status")
+def assistant_status():
+    cfg = get_engine_config()
+    return {
+        "status": "online",
+        "configured": cfg["configured"],
+        "provider": cfg["provider"],
+        "model": cfg["model"],
+        "name": "Pulse AI",
+        "role": "Social Intelligence Analyst & Tata STRIVE Dashboard Guide",
+    }
+
+@app.post("/api/assistant/chat", response_model=ChatResponse)
+async def assistant_chat(req: ChatRequest):
+    try:
+        return await process_chat(req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Assistant processing error: {str(e)}")
+
+# Mount Trend Intelligence & ML Forecasting Router
+from .trends.routes import router as trends_router
+from .trends.scheduler import scheduler
+from .api_endpoints import router as single_source_router
+from .ai.routes import router as ai_router
+
+app.include_router(trends_router)
+app.include_router(single_source_router)
+app.include_router(ai_router)
+
+@app.on_event("startup")
+def on_startup():
+    try:
+        scheduler.start()
+    except Exception as e:
+        print(f"Scheduler start notice: {e}")
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    print(f"Starting Social Pulse Sentiment Service on port {port}...")
+    print(f"Starting Social Pulse Sentiment, Trends & Assistant Service on port {port}...")
     uvicorn.run(app, host="0.0.0.0", port=port)

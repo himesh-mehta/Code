@@ -8,6 +8,14 @@ const DEFAULT_YOUTUBE_API_KEY =
   process.env.NEXT_PUBLIC_YOUTUBE_API_KEY ||
   "";
 
+// In-memory cache for ultra-fast response
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+}
+const youtubeCache = new Map<string, CacheEntry>();
+const YOUTUBE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 function decodeHtmlEntities(str: string): string {
   return str
     .replace(/&amp;/g, "&")
@@ -153,17 +161,21 @@ function classifyRelevance(title: string, desc: string, query: string): boolean 
   const q = query.toLowerCase();
 
   // Filter out Jeffrey Skilling (Enron) and Tom Skilling (weatherman) false positives
-  if (fullText.includes("jeffrey skilling") || fullText.includes("enron") || fullText.includes("tom skilling") || fullText.includes("weatherman")) {
+  if (
+    fullText.includes("jeffrey skilling") ||
+    fullText.includes("enron") ||
+    fullText.includes("tom skilling") ||
+    fullText.includes("weatherman")
+  ) {
     return false;
   }
 
-  // Filter out video game skilling (Runescape, OSRS, WoW, MMO)
+  // Filter out gaming keywords
   const gamingKeywords = ["osrs", "runescape", "ironman", "afk", "mmorpg", "pvp", "gameplay", "walkthrough", "speedrun"];
   if (gamingKeywords.some((g) => fullText.includes(g))) {
     return false;
   }
 
-  // Relevant employability / skilling / youth keywords
   const relevantKeywords = [
     "skill",
     "employability",
@@ -208,15 +220,28 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const cacheKey = `${q.toLowerCase()}:${limit}:${cursor || ""}`;
+  const cached = youtubeCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < YOUTUBE_CACHE_TTL_MS) {
+    return NextResponse.json(cached.data);
+  }
+
   if (!apiKey) {
     return NextResponse.json(
-      { error: "YouTube API key is not configured. Please supply apiKey parameter or set NEXT_PUBLIC_YOUTUBE_API_KEY." },
-      { status: 400 }
+      {
+        items: [],
+        total: 0,
+        hits_total: 0,
+        relevant_count: 0,
+        query: q,
+        source: "youtube",
+        error: "YOUTUBE_API_KEY is not configured. Please add YOUTUBE_API_KEY in .env.",
+      },
+      { status: 503 }
     );
   }
 
   try {
-    // When searching for skilling, add contextual terms so YouTube prioritizes vocational/employability content
     let searchTerms = q;
     const lowerQ = q.toLowerCase();
     if (lowerQ === "skilling" || lowerQ === "skills") {
@@ -235,31 +260,34 @@ export async function GET(request: NextRequest) {
       searchUrl.searchParams.set("pageToken", cursor);
     }
 
-    const searchRes = await fetch(searchUrl.toString(), {
-      next: { revalidate: 60 },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    if (searchRes.status === 403) {
-      const errData = await searchRes.json().catch(() => null);
-      const message = errData?.error?.message || "YouTube API quota exceeded or key restricted (HTTP 403).";
-      return NextResponse.json(
-        { error: message, status: 403, items: [], total: 0 },
-        { status: 403 }
-      );
-    }
-
-    if (searchRes.status === 429) {
-      return NextResponse.json(
-        { error: "YouTube rate limit reached (HTTP 429). Please pause momentarily.", status: 429, items: [], total: 0 },
-        { status: 429 }
-      );
+    let searchRes: Response;
+    try {
+      searchRes = await fetch(searchUrl.toString(), {
+        signal: controller.signal,
+        next: { revalidate: 60 },
+      });
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (!searchRes.ok) {
-      const errData = await searchRes.json().catch(() => null);
+      const errData = await searchRes.json().catch(() => ({}));
+      const errMsg = errData.error?.message || `YouTube API error (HTTP ${searchRes.status})`;
       return NextResponse.json(
-        { error: errData?.error?.message || `YouTube API error (HTTP ${searchRes.status})`, status: searchRes.status, items: [], total: 0 },
-        { status: searchRes.status }
+        {
+          items: [],
+          total: 0,
+          hits_total: 0,
+          relevant_count: 0,
+          query: q,
+          source: "youtube",
+          error: errMsg,
+          error_code: searchRes.status,
+        },
+        { status: searchRes.status >= 500 ? 502 : searchRes.status }
       );
     }
 
@@ -275,10 +303,11 @@ export async function GET(request: NextRequest) {
         relevant_count: 0,
         query: q,
         source: "youtube",
+        message: `No YouTube videos found matching "${q}".`,
       });
     }
 
-    // Fetch video statistics (likes, comments, views)
+    // Fetch genuine video statistics (likes, comments, views)
     const videoIds = rawItems.map((it: any) => it.id?.videoId).filter(Boolean);
     const statsMap: Record<string, { likes: number; comments: number; views: number }> = {};
 
@@ -301,7 +330,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Map into normalized Post model
+    // Map into normalized Post model with genuine metrics only
     const transformedPosts: Post[] = rawItems.map((it: any) => {
       const vidId = it.id?.videoId;
       const snippet = it.snippet || {};
@@ -324,15 +353,15 @@ export async function GET(request: NextRequest) {
         author_handle: `@${channel.replace(/\s+/g, "")}`,
         content: fullText,
         posted_at: snippet.publishedAt || new Date().toISOString(),
-        likes: stats.likes,
-        comments: stats.comments,
-        shares: Math.round(stats.likes * 0.12),
+        likes: stats.likes || undefined,
+        comments: stats.comments || undefined,
+        shares: undefined, // YouTube Data API v3 does not provide share counts
         topic: inferTopic(cleanTitle, cleanDesc, q),
         sentiment: inferSentiment(fullText),
         is_question: checkIfQuestion(cleanTitle) || checkIfQuestion(cleanDesc),
         is_relevant: isRelevant,
         url: `https://www.youtube.com/watch?v=${vidId}`,
-        is_sample: false, // Live verified YouTube API signal
+        is_sample: false,
         video_id: vidId || null,
         media_url: thumbnail,
       };
@@ -341,7 +370,7 @@ export async function GET(request: NextRequest) {
     const relevantCount = transformedPosts.filter((p) => p.is_relevant).length;
     const nextCursor = searchData.nextPageToken || null;
 
-    return NextResponse.json({
+    const finalResult = {
       items: transformedPosts,
       cursor: nextCursor,
       hits_total: searchData.pageInfo?.totalResults || transformedPosts.length,
@@ -349,16 +378,23 @@ export async function GET(request: NextRequest) {
       relevant_count: relevantCount,
       query: q,
       source: "youtube",
-    });
+    };
+
+    youtubeCache.set(cacheKey, { data: finalResult, timestamp: Date.now() });
+
+    return NextResponse.json(finalResult);
   } catch (err: any) {
-    console.error("Error fetching YouTube public stream:", err);
     return NextResponse.json(
       {
-        error: err.message || "Failed to contact YouTube API",
         items: [],
         total: 0,
+        hits_total: 0,
+        relevant_count: 0,
+        query: q,
+        source: "youtube",
+        error: err.message || "YouTube search failed or timed out.",
       },
-      { status: 500 }
+      { status: 504 }
     );
   }
 }

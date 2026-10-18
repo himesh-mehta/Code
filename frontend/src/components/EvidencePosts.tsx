@@ -4,6 +4,8 @@ import React, { useEffect, useState } from "react";
 import { Post } from "@/types";
 import { api } from "@/lib/api";
 import { PostCard } from "./PostCard";
+import { CommentsModal } from "./CommentsModal";
+import { ShareModal } from "./ShareModal";
 import { ShieldCheck, Loader2 } from "lucide-react";
 
 interface Props {
@@ -22,6 +24,8 @@ export function EvidencePosts({
   const [posts, setPosts] = useState<Post[]>(initialPosts || []);
   const [loading, setLoading] = useState<boolean>(!initialPosts && !!postIds);
   const [error, setError] = useState<string | null>(null);
+  const [activeCommentsPost, setActiveCommentsPost] = useState<Post | null>(null);
+  const [activeSharePost, setActiveSharePost] = useState<Post | null>(null);
 
   useEffect(() => {
     if (initialPosts) {
@@ -68,10 +72,34 @@ export function EvidencePosts({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {posts.map((post) => (
-            <PostCard key={post.id} post={post} />
+            <PostCard
+              key={post.id}
+              post={post}
+              onViewComments={(p) => setActiveCommentsPost(p)}
+              onShare={(p) => setActiveSharePost(p)}
+            />
           ))}
         </div>
       )}
+
+      {/* Discussion & Comments Modal */}
+      <CommentsModal
+        post={activeCommentsPost}
+        onClose={() => setActiveCommentsPost(null)}
+        onCommentAdded={(p, newCount) => {
+          setPosts((prev) =>
+            prev.map((item) =>
+              item.id === p.id ? { ...item, comments: newCount } : item
+            )
+          );
+        }}
+      />
+
+      {/* Share Insight Modal */}
+      <ShareModal
+        post={activeSharePost}
+        onClose={() => setActiveSharePost(null)}
+      />
     </div>
   );
 }

@@ -6,6 +6,14 @@ export const runtime = "nodejs";
 
 const BLUESKY_SEARCH_ENDPOINT = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts";
 
+// In-memory cache for ultra-fast response
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+}
+const blueskyCache = new Map<string, CacheEntry>();
+const BLUESKY_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim() || "";
@@ -15,44 +23,52 @@ export async function GET(request: NextRequest) {
 
   if (!q) {
     return NextResponse.json(
-      { error: "Query parameter 'q' is required (e.g. skilling, employability, apprenticeships)" },
+      { error: "Query parameter 'q' is required (e.g. skilling, youth employability, Tata STRIVE)" },
       { status: 400 }
     );
+  }
+
+  const cacheKey = `${q.toLowerCase()}:${limit}:${cursor || ""}`;
+  const cached = blueskyCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < BLUESKY_CACHE_TTL_MS) {
+    return NextResponse.json(cached.data);
   }
 
   try {
     const targetUrl = new URL(BLUESKY_SEARCH_ENDPOINT);
     targetUrl.searchParams.set("q", q);
     targetUrl.searchParams.set("limit", limit.toString());
+    targetUrl.searchParams.set("sort", "latest");
 
-    // If cursor looks like an ISO date or timestamp, use 'until', otherwise pass 'cursor'
     if (cursor) {
-      if (cursor.includes("T") || cursor.includes("-") || !isNaN(Number(cursor))) {
-        targetUrl.searchParams.set("until", cursor);
-      } else {
-        targetUrl.searchParams.set("cursor", cursor);
-      }
+      targetUrl.searchParams.set("cursor", cursor);
     }
 
     const headers: Record<string, string> = {
       Accept: "application/json",
-      "User-Agent": "SocialPulse-TataSTRIVE/1.0 (Next.js Social Listening Connector)",
+      "User-Agent": "SocialPulse-TataSTRIVE/1.0",
     };
 
-    let bskyRes = await fetch(targetUrl.toString(), {
-      method: "GET",
-      headers,
-      next: { revalidate: 30 }, // Cache briefly to prevent rate limits
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    // If cursor was blocked by WAF with 403, retry with 'until' if possible or without cursor
+    let bskyRes: Response;
+    try {
+      bskyRes = await fetch(targetUrl.toString(), {
+        method: "GET",
+        headers,
+        signal: controller.signal,
+        next: { revalidate: 30 },
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (bskyRes.status === 403 && cursor) {
-      console.warn("Bluesky returned 403 with cursor, retrying search without cursor...");
       targetUrl.searchParams.delete("cursor");
       bskyRes = await fetch(targetUrl.toString(), { method: "GET", headers });
     }
 
-    // Handle HTTP 429 Rate Limiting
     if (bskyRes.status === 429) {
       return NextResponse.json(
         {
@@ -60,12 +76,12 @@ export async function GET(request: NextRequest) {
           status: 429,
           items: [],
           total: 0,
+          source: "bluesky",
         },
         { status: 429 }
       );
     }
 
-    // Handle other HTTP errors
     if (!bskyRes.ok) {
       const errText = await bskyRes.text().catch(() => "");
       return NextResponse.json(
@@ -74,20 +90,33 @@ export async function GET(request: NextRequest) {
           status: bskyRes.status,
           items: [],
           total: 0,
+          source: "bluesky",
         },
-        { status: bskyRes.status }
+        { status: bskyRes.status >= 500 ? 502 : bskyRes.status }
       );
     }
 
     const data = await bskyRes.json();
     const rawPosts: any[] = data.posts || [];
 
+    if (rawPosts.length === 0) {
+      return NextResponse.json({
+        items: [],
+        cursor: null,
+        hits_total: 0,
+        total: 0,
+        relevant_count: 0,
+        query: q,
+        source: "bluesky",
+        message: `No Bluesky posts found matching "${q}".`,
+      });
+    }
+
     // Transform raw posts into normalized Social Pulse Post models
     const transformedPosts: Post[] = rawPosts.map((raw) =>
       transformBlueskyPost(raw, q)
     );
 
-    // Calculate next cursor: either data.cursor or the posted_at timestamp of the oldest post
     let nextCursor = data.cursor || null;
     if (!nextCursor && transformedPosts.length > 0) {
       nextCursor = transformedPosts[transformedPosts.length - 1].posted_at;
@@ -95,17 +124,7 @@ export async function GET(request: NextRequest) {
 
     const relevantCount = transformedPosts.filter((p) => p.is_relevant).length;
 
-    /*
-     * SUPABASE INTEGRATION HOOK (Ready for future database enablement):
-     * When Supabase credentials are configured, persist posts seamlessly here:
-     *
-     * if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-     *   const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-     *   await supabase.from('posts').upsert(transformedPosts, { onConflict: 'id' });
-     * }
-     */
-
-    return NextResponse.json({
+    const finalResult = {
       items: transformedPosts,
       cursor: nextCursor,
       hits_total: data.hitsTotal || transformedPosts.length,
@@ -113,16 +132,23 @@ export async function GET(request: NextRequest) {
       relevant_count: relevantCount,
       query: q,
       source: "bluesky",
-    });
+    };
+
+    blueskyCache.set(cacheKey, { data: finalResult, timestamp: Date.now() });
+    return NextResponse.json(finalResult);
   } catch (err: any) {
-    console.error("Error fetching Bluesky public stream:", err);
     return NextResponse.json(
       {
-        error: err.message || "Failed to contact Bluesky network",
         items: [],
+        cursor: null,
+        hits_total: 0,
         total: 0,
+        relevant_count: 0,
+        query: q,
+        source: "bluesky",
+        error: err.message || "Bluesky search failed or timed out.",
       },
-      { status: 500 }
+      { status: 504 }
     );
   }
 }

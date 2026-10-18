@@ -100,7 +100,7 @@ export async function fetchYouTubePosts(
 
     // 2. Fetch statistics (views, likes, comments) for returned video IDs
     const videoIds = items.map((it: any) => it.id?.videoId).filter(Boolean);
-    let statsMap: Record<string, { likes: number; comments: number; views: number }> = {};
+    const statsMap: Record<string, { likes: number; comments: number; views: number }> = {};
 
     if (videoIds.length > 0) {
       try {
@@ -140,9 +140,9 @@ export async function fetchYouTubePosts(
         author_handle: `@${channel.replace(/\s+/g, "")}`,
         content: fullText,
         posted_at: snippet.publishedAt || new Date().toISOString(),
-        likes: stats.likes,
-        comments: stats.comments,
-        shares: Math.round(stats.likes * 0.15),
+        likes: stats.likes || undefined,
+        comments: stats.comments || undefined,
+        // shares: not provided by YouTube Data API v3
         topic: inferTopic(title, description, query),
         sentiment: inferSentiment(fullText),
         is_question: checkIfQuestion(title) || checkIfQuestion(description),

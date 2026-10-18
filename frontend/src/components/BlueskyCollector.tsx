@@ -40,7 +40,7 @@ interface Props {
   onImportPosts: (posts: Post[]) => void;
 }
 
-export type CollectorSource = "all" | "youtube" | "bluesky" | "gdelt";
+export type CollectorSource = "all" | "youtube" | "bluesky" | "gdelt" | "google_news" | "google_maps";
 
 export function LiveSocialCollector({ isOpen, onToggle, onImportPosts }: Props) {
   const [query, setQuery] = useState("skilling");
@@ -89,9 +89,21 @@ export function LiveSocialCollector({ isOpen, onToggle, onImportPosts }: Props) 
         promises.push(Promise.resolve({ articles: [] }));
       }
 
-      const [ytRes, bskyRes, gdeltRes] = await Promise.allSettled(promises);
+      if (selectedSource === "all" || selectedSource === "google_news") {
+        promises.push(api.searchGoogleNews(q, 10));
+      } else {
+        promises.push(Promise.resolve({ items: [] }));
+      }
 
-      let newItems: Post[] = [];
+      if (selectedSource === "all" || selectedSource === "google_maps") {
+        promises.push(api.searchGooglePlaces(q, 8));
+      } else {
+        promises.push(Promise.resolve({ items: [] }));
+      }
+
+      const [ytRes, bskyRes, gdeltRes, gnewsRes, gplacesRes] = await Promise.allSettled(promises);
+
+      const newItems: Post[] = [];
       let nextYtCursor: string | null = null;
       let nextBskyCursor: string | null = null;
       let caughtError: string | null = null;
@@ -116,6 +128,14 @@ export function LiveSocialCollector({ isOpen, onToggle, onImportPosts }: Props) 
 
       if (gdeltRes.status === "fulfilled" && gdeltRes.value?.articles?.length > 0) {
         newItems.push(...gdeltRes.value.articles);
+      }
+
+      if (gnewsRes.status === "fulfilled" && gnewsRes.value?.items?.length > 0) {
+        newItems.push(...gnewsRes.value.items);
+      }
+
+      if (gplacesRes.status === "fulfilled" && gplacesRes.value?.items?.length > 0) {
+        newItems.push(...gplacesRes.value.items);
       }
 
       if (caughtError && newItems.length === 0) {
@@ -228,7 +248,7 @@ export function LiveSocialCollector({ isOpen, onToggle, onImportPosts }: Props) 
                     : "text-[#666666] hover:text-[#252525]"
                 }`}
               >
-                All Sources (YT, Bluesky, GDELT)
+                All 5 Streams
               </button>
               <button
                 type="button"
@@ -265,6 +285,30 @@ export function LiveSocialCollector({ isOpen, onToggle, onImportPosts }: Props) 
               >
                 <Newspaper className="w-3.5 h-3.5" />
                 <span>GDELT News</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedSource("google_news")}
+                className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  selectedSource === "google_news"
+                    ? "bg-blue-600 text-white shadow-2xs"
+                    : "text-[#666666] hover:text-blue-700"
+                }`}
+              >
+                <Newspaper className="w-3.5 h-3.5" />
+                <span>Google News</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedSource("google_maps")}
+                className={`inline-flex items-center gap-1 px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  selectedSource === "google_maps"
+                    ? "bg-emerald-600 text-white shadow-2xs"
+                    : "text-[#666666] hover:text-emerald-700"
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Google Places</span>
               </button>
             </div>
 

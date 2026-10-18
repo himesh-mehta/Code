@@ -3,13 +3,14 @@
 export type Platform =
   | "youtube"
   | "bluesky"
+  | "gdelt"
+  | "google_news"
+  | "google_maps"
   | "instagram"
   | "facebook"
   | "linkedin"
-  | "google_maps"
   | "google_play"
   | "csv_import"
-  | "gdelt"
   | "reddit"
   | "twitter"
   | "other";
@@ -23,6 +24,15 @@ export interface SentimentBreakdown {
   negative: number;
 }
 
+export interface CommentItem {
+  id: string;
+  author_handle: string;
+  content: string;
+  posted_at: string;
+  likes?: number;
+  is_official?: boolean;
+}
+
 export interface Post {
   id: string;
   platform: Platform;
@@ -34,6 +44,8 @@ export interface Post {
   shares?: number;
   rating?: number; // 1-5 for reviews (Google Maps, Google Play)
   topic: string;
+  topic_id?: string;
+  location?: string;
   sentiment: Sentiment;
   is_question: boolean;
   is_relevant?: boolean; // Relevant skilling & employability conversation
@@ -46,6 +58,7 @@ export interface Post {
   place_id?: string | null;
   article_title?: string | null;
   domain?: string | null;
+  comment_list?: CommentItem[];
 }
 
 export interface TrendPoint {
@@ -86,24 +99,105 @@ export interface ScoreBreakdown {
   growth: number;
   relevance: number;
   engagement: number;
-  sentiment_gap: number;
+  unmet_need?: number;
+  sentiment_gap?: number;
 }
+
+export interface WeightedBreakdown {
+  volume: number;
+  growth: number;
+  relevance: number;
+  engagement: number;
+  unmet_need: number;
+}
+
+export interface RawBreakdownValues {
+  volume: string;
+  growth: string;
+  relevance: string;
+  engagement: string;
+  unmet_need: string;
+}
+
+export type OpportunityQuadrant = "Act now" | "Build awareness" | "Protect and maintain" | "Watch";
 
 export interface Opportunity {
   id: string;
   title: string;
   topic: string;
-  summary: string;
+  topic_id?: string;
+  summary?: string;
   why_it_matters: string;
   score: number;
   score_breakdown: ScoreBreakdown;
-  score_weights: Record<keyof ScoreBreakdown, number>;
+  score_weights: Record<string, number>;
+  weighted_breakdown?: WeightedBreakdown;
+  raw_breakdown_values?: RawBreakdownValues;
+  score_driver_caption?: string;
   priority: Priority;
   supporting_post_ids: string[];
   recommended_action: string;
   platforms: Platform[];
   target_audience?: string;
   suggested_cta?: string;
+  is_sample?: boolean;
+  post_count?: number;
+  demand?: number;
+  momentum?: number;
+  growth_pct?: number | null;
+  growth_label?: string;
+  engagement?: number;
+  likes?: number;
+  comments?: number;
+  matching_course?: string;
+  questions_count?: number;
+  negative_count?: number;
+  quadrant?: OpportunityQuadrant;
+  quadrant_label?: string;
+  has_history_7d?: boolean;
+  evidence_posts?: any[];
+  sample_questions?: string[];
+}
+
+export interface OpportunitySummaryStrip {
+  total: number;
+  high_count: number;
+  top_opportunity: string;
+  top_score: number;
+  headline: string;
+}
+
+export interface QuadrantMedians {
+  median_demand: number;
+  median_momentum: number;
+}
+
+export interface OpportunityTimeseriesPoint {
+  date: string;
+  [key: string]: any;
+}
+
+export interface Top5OpportunityMetadata {
+  id: string;
+  topic_id: string;
+  topic: string;
+  has_history_7d: boolean;
+  score: number;
+}
+
+export interface OpportunityResponse {
+  status: string;
+  total_opportunities: number;
+  filtered_count?: number;
+  is_sample: boolean;
+  items: Opportunity[];
+  opportunities: Opportunity[];
+  all_opportunities?: Opportunity[];
+  summary_strip: OpportunitySummaryStrip;
+  quadrant_medians: QuadrantMedians;
+  timeseries_30d: OpportunityTimeseriesPoint[];
+  top_5_metadata: Top5OpportunityMetadata[];
+  updated_at: string;
 }
 
 export type CampaignTone = "friendly" | "professional" | "inspiring";
@@ -122,6 +216,7 @@ export interface Campaign {
 export interface Overview {
   is_sample: boolean;
   last_updated: string;
+  updated_at?: string;
   total_posts: number;
   relevant_posts: number;
   questions_detected: number;
@@ -133,6 +228,90 @@ export interface Overview {
   top_questions: AudienceQuestion[];
   top_opportunities: Opportunity[];
   recent_posts: Post[];
+  top_impact_cards?: {
+    most_discussed: { topic: string; mentions_7d: number; growth_pct: number; hubs_reporting: string };
+    fastest_growing: { topic: string; new_questions: number; growth_pct: number; subtitle: string };
+    needs_attention: { topic: string; subtitle: string; decline_pct: number; action: string };
+  };
+  learner_voices?: Array<{
+    quote: string;
+    author: string;
+    source: string;
+    topic: string;
+    url: string;
+    likes: number;
+    published_at: string;
+  }>;
+  telemetry_curve?: Array<{
+    date: string;
+    count: number;
+  }>;
+  last_successful_refresh?: string;
+  last_refresh_attempt?: {
+    timestamp: string;
+    status: string;
+    trigger?: string;
+    error?: string;
+    new_posts?: number;
+  };
+}
+
+export interface OfficialImpactMetric {
+  id: string;
+  name: string;
+  value: number;
+  display_value: string;
+  unit: string;
+  definition: string;
+  reporting_period: string;
+  is_cumulative: boolean;
+  source_url: string;
+  verified_date: string;
+  highlight?: boolean;
+}
+
+export interface OfficialImpactResponse {
+  organization: string;
+  official_website: string;
+  impact_page: string;
+  what_we_do_page: string;
+  last_retrieved: string;
+  status: string;
+  notice: string;
+  cumulative_metrics: OfficialImpactMetric[];
+  annual_outcomes: OfficialImpactMetric[];
+}
+
+export interface AppSettings {
+  account: {
+    display_name: string;
+    email: string;
+    organization: string;
+    role: string;
+    avatar_initials: string;
+    session_status: string;
+    auth_configured: boolean;
+    auth_note: string;
+  };
+  appearance: {
+    theme: string;
+    density: string;
+  };
+  data_collection: {
+    refresh_interval_minutes: number;
+    auto_sync_enabled: boolean;
+    monitored_topics: string[];
+    keywords: string[];
+    sentiment_threshold: number;
+  };
+  ai_analysis: {
+    model_name: string;
+    default_tone: string;
+    default_language: string;
+    strict_factual_grounding: boolean;
+    zero_hallucination_mode: boolean;
+    api_configured: boolean;
+  };
 }
 
 export interface AudienceResponse {
@@ -153,11 +332,13 @@ export interface PostsQuery {
   platform?: Platform;
   sentiment?: Sentiment;
   topic?: string;
+  topic_id?: string;
   is_question?: boolean;
   is_relevant?: boolean;
   date_range?: "7d" | "14d" | "30d" | "90d" | "all";
   ids?: string[];
   sort?: "recent" | "engagement" | "rating";
+  mix_sources?: boolean;
   page?: number;
   page_size?: number;
 }
@@ -202,4 +383,127 @@ export interface GdeltNewsResponse {
   notice?: string;
   source: "gdelt";
 }
+
+export interface StudioEvidencePack {
+  topic: string;
+  is_off_topic: boolean;
+  has_live_data: boolean;
+  post_count: number;
+  snapshot: {
+    mentions_7d: number;
+    mentions_prev_7d: number;
+    change_pct: number | null;
+    is_new: boolean;
+    status: "Growing" | "Steady" | "Cooling";
+    updated_at: string;
+  } | null;
+  what_people_are_saying: {
+    positive: number;
+    neutral: number;
+    negative: number;
+    positive_pct: number;
+    neutral_pct: number;
+    negative_pct: number;
+    top_themes: string[];
+  } | null;
+  questions: Array<{
+    id: string;
+    text: string;
+    source: string;
+    author: string;
+    url: string;
+    published_at: string;
+  }>;
+  matching_programme: {
+    name: string;
+    description: string;
+    url: string;
+  } | null;
+  best_time_to_post: {
+    windows: string[];
+    sentence: string;
+  } | null;
+  top_posts: Array<{
+    title: string;
+    url: string;
+    source: string;
+    author: string;
+    likes: number;
+  }>;
+  evidence_context_for_ai: any;
+}
+
+export interface StudioSuggestionsResponse {
+  taxonomy_topics: string[];
+  strive_programmes: Array<{
+    name: string;
+    category: string;
+    source: string;
+  }>;
+}
+
+export interface OfflineCentre {
+  id: string;
+  name: string;
+  short_name: string;
+  city: string;
+  state: string;
+  zone: string;
+  type: "Flagship TSSDC" | "Domain TSEC";
+  address: string;
+  key_domains: string[];
+  specialized_labs: string[];
+  corporate_partners: string[];
+  annual_capacity: number;
+  placement_rate: string;
+  contact_email: string;
+  primary_topic: string;
+  description: string;
+}
+
+export interface OutreachInitiative {
+  id: string;
+  title: string;
+  description: string;
+  target_cohort: string;
+  tag: string;
+  icon: string;
+  topic: string;
+  centre_name: string;
+  centre_location: string;
+  action_cta: string;
+}
+
+export interface CategorizedFaq {
+  id: string;
+  topic: string;
+  topic_id?: string;
+  count: number;
+  sample_question: string;
+  suggested_reply: string;
+  reply_label?: string;
+  centre_connection?: string;
+}
+
+export interface RealAudienceResponse {
+  status: string;
+  is_sample: boolean;
+  learner_questions_digest: {
+    total_questions: number;
+    sources_used: string[];
+    period: string;
+  };
+  offline_centres: OfflineCentre[];
+  outreach_initiatives: OutreachInitiative[];
+  categorized_faqs: CategorizedFaq[];
+  best_time_to_post: Array<{
+    hour: string;
+    label: string;
+    score: number;
+    peak: boolean;
+  }>;
+  updated_at: string;
+}
+
+
 

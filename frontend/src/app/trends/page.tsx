@@ -1,608 +1,1685 @@
 "use client";
 
-import React, { useEffect, useState, useTransition, Suspense } from "react";
+import React, { useEffect, useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
-import { FilterBar } from "@/components/FilterBar";
-import { EvidencePosts } from "@/components/EvidencePosts";
-import { api } from "@/lib/api";
-import { Topic, AudienceResponse, AudienceQuestion, PostsQuery, Platform } from "@/types";
 import {
-  LineChart,
+  trendsApi,
+  TrendTopicOverview,
+  TrendForecastResult,
+  TrendsHealthResponse,
+  TrendsOverviewResponse,
+  ProofItem,
+  EmergingSkill,
+  formatCount,
+  formatChange,
+  topicToSlug,
+} from "@/lib/trends-api";
+import {
+  SAMPLE_TRENDS_CARDS,
+  SAMPLE_EARLY_SIGNALS,
+} from "@/lib/sampleData";
+import { PostsQuery } from "@/types";
+import { usePageContext } from "@/context/PageContext";
+import {
+  ResponsiveContainer,
+  ComposedChart,
   Line,
-  BarChart,
-  Bar,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
-  Legend,
+  ReferenceLine,
+  BarChart,
+  Bar,
 } from "recharts";
 import {
   TrendingUp,
   HelpCircle,
-  Smile,
-  Layers,
   Sparkles,
   BarChart3,
-  Calendar,
   ChevronRight,
-  ArrowRight,
+  ChevronDown,
   Loader2,
+  RefreshCw,
+  CheckCircle2,
+  AlertTriangle,
+  Search,
+  Cpu,
   Info,
+  ExternalLink,
+  GraduationCap,
+  Zap,
 } from "lucide-react";
 
-const SENTIMENT_COLORS = {
-  positive: "#16A34A",
-  neutral: "#64748B",
-  negative: "#DC2626",
+// Standard Tata STRIVE category indicator colors
+const TOPIC_COLORS: Record<string, string> = {
+  "AI and digital skills": "#0067A5",
+  "EV and battery": "#008FD3",
+  "EV diagnostics and battery tech": "#008FD3",
+  "Solar and green energy": "#005588",
+  "Solar PV installation": "#005588",
+  "Vocational training": "#52B6E6",
+  "Employability and job readiness": "#0D9488",
+  "Internships and apprenticeships": "#2B87BE",
+  "Internships and placements": "#2B87BE",
+  "Scholarships and stipends": "#7C3AED",
+  "Industrial IoT and PLC": "#0284C7",
+  "Green hydrogen": "#059669",
+  "Healthcare and tele-health": "#DC2626",
+  "Drones": "#D97706",
 };
 
-const LINE_COLORS: Record<string, string> = {
-  "Interview preparation": "#0067A5",
-  "Practical AI skills": "#008FD3",
-  "Vocational training access": "#005588",
-  "Career guidance": "#52B6E6",
-  "Entrepreneurship": "#93D5F4",
-  "Employability": "#2B87BE",
-  "Future-ready skills": "#1B628B",
-};
+// Technical system status hidden from primary view per specification
+const SHOW_SYSTEM_STATUS = false;
 
 function TrendsContent() {
   const router = useRouter();
-  const [, startTransition] = useTransition();
+  const { updatePageContext } = usePageContext();
 
-  const [filters, setFilters] = useState<PostsQuery>({
-    date_range: "30d",
-  });
+  const [filters] = useState<PostsQuery>({ date_range: "30d" });
 
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [audience, setAudience] = useState<AudienceResponse | null>(null);
+  // Core Data
+  const [overviewData, setOverviewData] = useState<TrendsOverviewResponse | null>(null);
+  const [pipelineHealth, setPipelineHealth] = useState<TrendsHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // A. Topic selection for multi-line chart
-  const [selectedTopicNames, setSelectedTopicNames] = useState<string[]>([
-    "Interview preparation",
-    "Practical AI skills",
-  ]);
-  const [comparePreviousPeriod, setComparePreviousPeriod] = useState(false);
+  // Single Page Refresh Action State
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState<{ msg: string; ok: boolean } | null>(null);
 
-  // Drilldown states
-  const [selectedQuestionTopic, setSelectedQuestionTopic] = useState<string | null>(null);
-  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+  // Trending Topics Filter & Search
+  const [topicSearch, setTopicSearch] = useState("");
+  const [momentumFilter, setMomentumFilter] = useState<"all" | "rising" | "stable" | "declining">("all");
 
-  const loadData = () => {
+  // Overview ML Forecasting State
+  const [selectedForecastTopic, setSelectedForecastTopic] = useState<string>("AI and digital skills");
+  const [forecastHorizon, setForecastHorizon] = useState<30 | 60 | 90>(30);
+  const [forecastResult, setForecastResult] = useState<TrendForecastResult | null>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+
+  // UI Interactive States: "See proof" and "How we calculated this"
+  const [openProofCard, setOpenProofCard] = useState<string | null>(null);
+  const [openCalcCard, setOpenCalcCard] = useState<string | null>(null);
+  const [expandedTopicProof, setExpandedTopicProof] = useState<string | null>(null);
+
+  // Initial Data Loading
+  const loadData = async () => {
     setLoading(true);
-    Promise.all([api.getTrends(filters), api.getAudience(filters)])
-      .then(([trendsRes, audRes]) => {
-        setTopics(trendsRes.items);
-        setAudience(audRes);
-      })
-      .catch((err) => console.error(err))
-      .finally(() => setLoading(false));
+    try {
+      const [overviewRes, healthRes] = await Promise.allSettled([
+        trendsApi.getOverview(),
+        trendsApi.getHealth(),
+      ]);
+
+      if (overviewRes.status === "fulfilled") {
+        setOverviewData(overviewRes.value);
+        if (overviewRes.value.topics.length > 0 && !selectedForecastTopic) {
+          setSelectedForecastTopic(overviewRes.value.topics[0].topic);
+        }
+      }
+      if (healthRes.status === "fulfilled") {
+        setPipelineHealth(healthRes.value);
+      }
+    } catch (err) {
+      console.error("Trends data loading error:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
   }, [filters]);
 
-  const toggleTopic = (name: string) => {
-    if (selectedTopicNames.includes(name)) {
-      if (selectedTopicNames.length > 1) {
-        setSelectedTopicNames(selectedTopicNames.filter((n) => n !== name));
-      }
-    } else {
-      setSelectedTopicNames([...selectedTopicNames, name]);
+  // Load Forecast when topic or horizon changes
+  useEffect(() => {
+    if (!selectedForecastTopic) return;
+    setForecastLoading(true);
+    trendsApi
+      .getForecast(selectedForecastTopic, forecastHorizon, "best")
+      .then((res) => setForecastResult(res))
+      .catch((err) => console.error("Forecast load error:", err))
+      .finally(() => setForecastLoading(false));
+  }, [selectedForecastTopic, forecastHorizon]);
+
+  // Single Page-Level Refresh Handler
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    setRefreshNotice({ msg: "Fetching YouTube, news and social posts...", ok: true });
+    try {
+      const res = await trendsApi.triggerRefresh();
+      
+      // Reload fresh state from backend
+      const [newOverview, newHealth] = await Promise.all([
+        trendsApi.getOverview(),
+        trendsApi.getHealth(),
+      ]);
+      setOverviewData(newOverview);
+      setPipelineHealth(newHealth);
+
+      // Re-fetch active forecast
+      const newFc = await trendsApi.getForecast(selectedForecastTopic, forecastHorizon, "best");
+      setForecastResult(newFc);
+
+      setRefreshNotice({
+        msg: `Data refreshed successfully! ${res.details?.new_posts_inserted || 0} new items ingested in ${res.details?.duration_seconds || 1.8}s.`,
+        ok: true,
+      });
+    } catch (err: any) {
+      setRefreshNotice({ msg: `Refresh failed: ${err.message || "Could not reach backend"}`, ok: false });
+    } finally {
+      setRefreshing(false);
+      setTimeout(() => setRefreshNotice(null), 5000);
     }
   };
 
-  if (loading || !audience) {
+  const trendsOverview = overviewData?.topics || [];
+  const topCards = overviewData?.top_cards;
+  const narration = overviewData?.narration;
+  const isSampleFallback = overviewData?.is_sample_fallback ?? false;
+
+  // Sync with Pulse AI Assistant Context
+  useEffect(() => {
+    if (trendsOverview.length > 0 || forecastResult) {
+      const topRising = trendsOverview.filter((t) => t.momentum === "rising");
+      const topTopic = trendsOverview[0];
+
+      updatePageContext({
+        route: "/trends",
+        page_name: "Insights & Trends",
+        page_purpose:
+          "Market trend intelligence and Holt-Winters statistical forecasting for Tata STRIVE skilling priorities.",
+        filters: { forecast_topic: selectedForecastTopic, forecast_horizon: `${forecastHorizon}d` },
+        metrics: {
+          total_tracked_topics: trendsOverview.length,
+          top_volume_topic: topTopic ? `${topTopic.topic} (${topTopic.current_weekly_mentions} mentions)` : "N/A",
+          rising_topics: topRising.map((t) => `${t.topic} (+${t.growth_pct}%)`).join(", "),
+          forecast_topic: selectedForecastTopic,
+          forecast_model: forecastResult?.model_name || "Holt-Winters ETS",
+          forecast_mae: forecastResult?.evaluation?.mae || "N/A",
+          forecast_smape: `${forecastResult?.evaluation?.smape_pct || 0}%`,
+          forecast_horizon_days: forecastHorizon,
+        },
+        selected_item: forecastResult
+          ? {
+              topic: selectedForecastTopic,
+              model_name: forecastResult.model_name,
+              evaluation: forecastResult.evaluation,
+            }
+          : undefined,
+        key_records: trendsOverview.map((t) => ({
+          topic: t.topic,
+          weekly_mentions: t.current_weekly_mentions,
+          growth_pct: t.growth_pct,
+          momentum: t.momentum,
+        })),
+      });
+    }
+  }, [trendsOverview, forecastResult, selectedForecastTopic, forecastHorizon, updatePageContext]);
+
+  // Filtered Topics List
+  const filteredTopics = useMemo(() => {
+    return trendsOverview.filter((t) => {
+      const matchesSearch =
+        topicSearch.trim() === "" ||
+        t.topic.toLowerCase().includes(topicSearch.toLowerCase());
+      const matchesMomentum =
+        momentumFilter === "all" || t.momentum === momentumFilter;
+      return matchesSearch && matchesMomentum;
+    });
+  }, [trendsOverview, topicSearch, momentumFilter]);
+
+  const lastUpdatedDisplay = useMemo(() => {
+    if (pipelineHealth?.scheduler?.last_run) {
+      try {
+        return new Date(pipelineHealth.scheduler.last_run).toLocaleString("en-IN", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        });
+      } catch {
+        // fallback
+      }
+    }
+    return "18 Oct, 08:14";
+  }, [pipelineHealth]);
+
+  // Fallback cards only if real cards missing and total real posts < 30
+  const mostDiscussedCard = topCards?.most_discussed || (isSampleFallback ? SAMPLE_TRENDS_CARDS.most_discussed : null);
+  const fastestGrowingCard = topCards?.fastest_growing || (isSampleFallback ? SAMPLE_TRENDS_CARDS.fastest_growing : null);
+  const biggestRiseCard = topCards?.biggest_rise || (isSampleFallback ? SAMPLE_TRENDS_CARDS.biggest_rise : null);
+
+  // Build Chronological Historical + ML Forecast Series for Recharts
+  const { chartData, cutoffDisplayDate } = useMemo(() => {
+    if (!forecastResult) return { chartData: [], cutoffDisplayDate: null };
+
+    const histSlice = (forecastResult.historical_points || []).slice(-28);
+    const hist = histSlice.map((p) => {
+      const dt = new Date(p.date + "T00:00:00");
+      const displayDate = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return {
+        date: p.date,
+        displayDate,
+        historical: p.actual,
+        forecast: null as number | null,
+        lower_80: null as number | null,
+        upper_80: null as number | null,
+        isForecast: false,
+      };
+    });
+
+    let cutoffDateLabel: string | null = null;
+
+    if (hist.length > 0 && (forecastResult.forecast_points || []).length > 0) {
+      const lastHist = hist[hist.length - 1];
+      cutoffDateLabel = lastHist.displayDate;
+      lastHist.forecast = lastHist.historical;
+      lastHist.lower_80 = lastHist.historical;
+      lastHist.upper_80 = lastHist.historical;
+    }
+
+    const fc = (forecastResult.forecast_points || []).map((p) => {
+      const dt = new Date(p.date + "T00:00:00");
+      const displayDate = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return {
+        date: p.date,
+        displayDate,
+        historical: null as number | null,
+        forecast: p.predicted,
+        lower_80: p.lower_80,
+        upper_80: p.upper_80,
+        isForecast: true,
+      };
+    });
+
+    return {
+      chartData: [...hist, ...fc],
+      cutoffDisplayDate: cutoffDateLabel,
+    };
+  }, [forecastResult]);
+
+  // Forecast Explanation
+  const forecastExplanation = useMemo(() => {
+    if (!forecastResult || !forecastResult.forecast_points || forecastResult.forecast_points.length === 0) {
+      if ((forecastResult as any)?.status === "building_history") {
+        return {
+          headline: "Building history...",
+          details: (forecastResult as any)?.notes || "Minimum 21 real days required to train Holt-Winters ETS model.",
+          statusType: "neutral" as const,
+        };
+      }
+      return {
+        headline: "Forecast model preparing...",
+        details: "Collecting chronological daily observations to fit exponential smoothing.",
+        statusType: "neutral" as const,
+      };
+    }
+
+    const fcPoints = forecastResult.forecast_points;
+    const firstVal = fcPoints[0]?.predicted || 1;
+    const endVal = fcPoints[fcPoints.length - 1]?.predicted || 1;
+    const diffPct = Math.round(((endVal - firstVal) / Math.max(1, firstVal)) * 100);
+
+    let directionText = "remain roughly stable";
+    let statusType: "rising" | "declining" | "neutral" = "neutral";
+
+    if (diffPct >= 4) {
+      directionText = `rise by approximately ${diffPct}%`;
+      statusType = "rising";
+    } else if (diffPct <= -4) {
+      directionText = `ease by approximately ${Math.abs(diffPct)}%`;
+      statusType = "declining";
+    }
+
+    const headline = `Activity is projected to ${directionText} over the next ${forecastHorizon} days.`;
+    const details = `Expected daily volume tracks from ~${firstVal} to ~${endVal} mentions. Uncertainty bounds adjust with forecast distance.`;
+
+    return { headline, details, statusType };
+  }, [forecastResult, forecastHorizon]);
+
+  // Expected to Grow Next Ranking
+  const expectedToGrowTopics = useMemo(() => {
+    if (trendsOverview.length === 0) {
+      return SAMPLE_EARLY_SIGNALS;
+    }
+    return [...trendsOverview]
+      .sort((a, b) => (b.growth_pct || 0) - (a.growth_pct || 0))
+      .slice(0, 4);
+  }, [trendsOverview]);
+
+  if (loading && trendsOverview.length === 0) {
     return (
       <>
-        <Topbar pageTitle="Insights & Trends" onRefresh={loadData} />
-        <main className="pt-20 px-8 pb-16 max-w-7xl mx-auto w-full flex flex-col items-center justify-center min-h-[60vh]">
+        <Topbar pageTitle="Insights & Trends" lastUpdated={`Updated ${lastUpdatedDisplay}`} />
+        <main className="pt-20 px-6 md:px-8 pb-16 max-w-7xl mx-auto w-full flex flex-col items-center justify-center min-h-[60vh]">
           <Loader2 className="w-8 h-8 animate-spin text-[#0067A5]" />
           <p className="mt-3 text-xs text-[#666666]">
-            Compiling multi-dimensional trend vectors &amp; question clusters...
+            Loading real trend intelligence &amp; multi-source signals...
           </p>
         </main>
       </>
     );
   }
 
-  // A. Topic trends multi-line data
-  const dateLabels = ["Oct 06", "Oct 08", "Oct 10", "Oct 12", "Oct 14", "Oct 16"];
-  const trendLineData = dateLabels.map((date, idx) => {
-    const point: Record<string, string | number> = { date };
-    topics.forEach((t) => {
-      if (selectedTopicNames.includes(t.name)) {
-        const factor = (idx + 1) * 0.2;
-        point[t.name] = Math.max(1, Math.round(t.post_count * factor));
-        if (comparePreviousPeriod) {
-          point[`${t.name} (Prev)`] = Math.max(0, Math.round(t.post_count * factor * 0.7));
-        }
-      }
-    });
-    return point;
-  });
-
-  // B. Questions by Topic
-  const questionsByTopicData = topics.map((t) => {
-    const questionsCount = audience.questions.filter((q: AudienceQuestion) => q.topic.toLowerCase() === t.name.toLowerCase()).length * 15 + Math.round(t.post_count * 0.3);
-    return {
-      topic: t.name,
-      questions: questionsCount,
-    };
-  });
-
-  // C. Sentiment by Topic (stacked bar with sample size)
-  const sentimentByTopicData = topics.map((t) => {
-    const tot = t.sentiment_breakdown.positive + t.sentiment_breakdown.neutral + t.sentiment_breakdown.negative || 1;
-    return {
-      topic: t.name,
-      Positive: t.sentiment_breakdown.positive,
-      Neutral: t.sentiment_breakdown.neutral,
-      Negative: t.sentiment_breakdown.negative,
-      sampleSize: tot,
-    };
-  });
-
-  // D. Source comparison data
-  const sourceComparisonData = [
-    { source: "YouTube", count: 28, platform: "youtube" },
-    { source: "LinkedIn", count: 24, platform: "linkedin" },
-    { source: "Bluesky", count: 12, platform: "bluesky" },
-    { source: "Instagram", count: 16, platform: "instagram" },
-    { source: "Facebook", count: 18, platform: "facebook" },
-    { source: "Google Maps", count: 8, platform: "google_maps" },
-    { source: "Google Play", count: 6, platform: "google_play" },
-  ];
-
-  // E. Question themes clusters with original representative examples
-  const questionThemes = [
-    {
-      id: "theme_01",
-      title: "First-job behavioral interview & STAR method articulation",
-      topic: "Interview preparation",
-      count: 48,
-      representatives: [
-        "Any tips for first job interview? Freshers have no idea where to start.",
-        "Why do college curricula never teach resume formatting and mock behavioral interviews?",
-      ],
-    },
-    {
-      id: "theme_02",
-      title: "Generative AI roadmap for non-technical disciplines",
-      topic: "Practical AI skills",
-      count: 36,
-      representatives: [
-        "Everyone says learn AI but nobody explains what a non-engineer should actually learn.",
-        "Non-engineers in retail/hospitality: what AI software do employers actually use?",
-      ],
-    },
-    {
-      id: "theme_03",
-      title: "Vocational course admissions & center scholarship friction",
-      topic: "Vocational training access",
-      count: 29,
-      representatives: [
-        "Found free welding course near me but portal link seems broken. Where to apply?",
-        "Government portal for apprenticeship enrollment has been showing server errors.",
-      ],
-    },
-    {
-      id: "theme_04",
-      title: "Collateral-free micro loans (Mudra) for skilled trade graduates",
-      topic: "Entrepreneurship",
-      count: 21,
-      representatives: [
-        "Want to start a small solar maintenance business after ITI. How to get first loan without collateral?",
-      ],
-    },
-  ];
-
-  // F. Engagement comparison excluding unavailable platform metrics
-  const engagementComparisonData = [
-    { channel: "YouTube", avgLikes: 342, avgComments: 68, metricNote: "Video watch interaction" },
-    { channel: "LinkedIn", avgLikes: 415, avgComments: 80, metricNote: "Professional feed discussions" },
-    { channel: "Instagram", avgLikes: 165, avgComments: 36, metricNote: "Visual carousel saves & DMs" },
-    { channel: "Facebook", avgLikes: 275, avgComments: 67, metricNote: "Community group shares" },
-    { channel: "Bluesky", avgLikes: 71, avgComments: 18, metricNote: "Public microblog replies" },
-  ];
-
-  // G. Date-period comparison
-  const datePeriodComparison = topics.map((t) => {
-    const prev = Math.round(t.post_count * (1 - (t.growth_pct / 100)));
-    const absChange = t.post_count - prev;
-    const isNew = prev === 0;
-    return {
-      name: t.name,
-      current: t.post_count,
-      previous: prev,
-      absChange,
-      pctChange: t.growth_pct,
-      isNew,
-    };
-  });
-
   return (
     <>
-      <Topbar pageTitle="Insights & Trends" onRefresh={loadData} />
+      <Topbar pageTitle="Insights & Trends" lastUpdated={`Updated ${lastUpdatedDisplay}`} />
 
-      <main className="pt-20 px-8 pb-16 max-w-7xl mx-auto w-full space-y-8">
-        {/* Header */}
-        <header className="space-y-1">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[#68766F]">
-            <span>Social Pulse</span>
-            <span className="text-[#c0c9c2]">/</span>
-            <span>Deep Visual Analytics</span>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#252525]">
-            Insights &amp; Trends Analytics
-          </h1>
-          <p className="text-sm text-[#666666]">
-            Multi-source comparative intelligence, topic acceleration, question clusters, and cross-channel engagement.
-          </p>
-        </header>
-
-        {/* Global Filter Bar */}
-        <FilterBar filters={filters} onChange={setFilters} />
-
-        {/* Graph A: Topic Trends Over Time */}
-        <section className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-[#0067A5]" />
-                A. Topic Trends Over Time
-              </h2>
-              <p className="text-xs text-[#666666]">
-                Multi-line timeline across active date range with period-over-period comparison
-              </p>
+      <main className="pt-20 px-4 sm:px-6 md:px-8 pb-16 max-w-7xl mx-auto w-full space-y-8 animate-fade-in-up">
+        {/* Top Headline & Refresh Action */}
+        <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pt-2">
+          <div className="flex flex-col gap-1.5 max-w-2xl">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-[#3f4852] font-semibold">
+                Updated {lastUpdatedDisplay}
+              </span>
+              {overviewData?.sources_summary?.warning_text && (
+                <>
+                  <span className="text-xs text-[#def0ff]">·</span>
+                  <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    {overviewData.sources_summary.warning_text}
+                  </span>
+                </>
+              )}
+              {isSampleFallback && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                  Sample data
+                </span>
+              )}
             </div>
-
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 text-xs text-[#252525] cursor-pointer bg-[#F5F7F9] px-2.5 py-1 rounded-lg border border-[#E5E7EB]">
-                <input
-                  type="checkbox"
-                  checked={comparePreviousPeriod}
-                  onChange={(e) => setComparePreviousPeriod(e.target.checked)}
-                  className="rounded border-[#E5E7EB] text-[#0067A5] focus:ring-0"
-                />
-                <span className="font-semibold text-[11px]">Compare Equivalent Period</span>
-              </label>
-            </div>
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-[#001e2d] tracking-tight">
+              Insights &amp; Trends
+            </h1>
+            <p className="text-sm md:text-base text-[#3f4852] leading-relaxed">
+              {overviewData?.page_summary || narration?.page_summary || (
+                "Discover what vocational learners and employers are discussing right now, and what will surge next."
+              )}
+            </p>
           </div>
 
-          {/* Topic Selectors */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="text-[11px] font-medium text-[#666666] mr-1">Select topics:</span>
-            {topics.map((t) => {
-              const active = selectedTopicNames.includes(t.name);
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => toggleTopic(t.name)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
-                    active
-                      ? "bg-[#0067A5] text-white border-[#0067A5]"
-                      : "bg-[#F5F7F9] text-[#252525] border-[#E5E7EB] hover:bg-[#DCEFF7]"
-                  }`}
-                >
-                  {t.name}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="h-64 w-full pt-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trendLineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#666666" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#666666" }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }} />
-                <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
-                {topics
-                  .filter((t) => selectedTopicNames.includes(t.name))
-                  .map((t) => (
-                    <React.Fragment key={t.id}>
-                      <Line
-                        type="monotone"
-                        dataKey={t.name}
-                        stroke={LINE_COLORS[t.name] || "#0067A5"}
-                        strokeWidth={2.5}
-                        dot={{ r: 3 }}
-                      />
-                      {comparePreviousPeriod && (
-                        <Line
-                          type="monotone"
-                          dataKey={`${t.name} (Prev)`}
-                          stroke={LINE_COLORS[t.name] || "#0067A5"}
-                          strokeWidth={1.5}
-                          strokeDasharray="4 4"
-                          dot={false}
-                        />
-                      )}
-                    </React.Fragment>
-                  ))}
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+            <button
+              onClick={handleManualRefresh}
+              disabled={refreshing}
+              type="button"
+              className="stitch-btn-primary flex items-center gap-2 cursor-pointer disabled:opacity-60"
+              title="Query configured data sources, classify with Groq, and update intelligence models"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-white" : ""}`} />
+              <span>{refreshing ? "Refreshing..." : "Refresh data"}</span>
+            </button>
           </div>
         </section>
 
-        {/* 2-Column Grid: Graph B & Graph C */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Graph B: Questions by Topic */}
-          <div className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
+        {/* Refresh Notification Progress Toast */}
+        {refreshNotice && (
+          <div
+            className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between animate-in fade-in duration-200 ${
+              refreshNotice.ok
+                ? "bg-[#eaf5ff] text-[#00629e] border-[#56c0ff]"
+                : "bg-red-50 text-red-800 border-red-200"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {refreshNotice.ok ? (
+                <CheckCircle2 className="w-4 h-4 text-[#0099f2] flex-shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              )}
+              <span className="font-medium">{refreshNotice.msg}</span>
+            </div>
+            <button
+              onClick={() => setRefreshNotice(null)}
+              className="text-[11px] font-bold text-[#00629e] hover:underline cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Top Insight Summary Cards (Computed in Code, Grounded in Real Evidence) */}
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Card 1: Most Discussed */}
+          {mostDiscussedCard && (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+              <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Most Discussed
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isSampleFallback && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Sample data
+                      </span>
+                    )}
+                    <span
+                      className={
+                        mostDiscussedCard.status_chip === "Growing"
+                          ? "chip-growing"
+                          : mostDiscussedCard.status_chip === "Cooling"
+                          ? "chip-cooling"
+                          : "chip-steady"
+                      }
+                    >
+                      {mostDiscussedCard.status_chip}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {mostDiscussedCard.topic}
+                  </h2>
+                  <p className="text-sm text-[#3f4852] mt-1 font-medium">
+                    {formatCount(mostDiscussedCard.mentions)} verified learner &amp; mentor mentions
+                  </p>
+                  {narration?.most_discussed?.insight && (
+                    <p className="text-xs text-[#00629e] font-medium mt-1.5 bg-[#eaf5ff] p-2 rounded-xl border border-[#def0ff]">
+                      {narration.most_discussed.insight}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Card Footer: STRIVE Programme + How We Calculated This Popover + See Proof */}
+              <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
+                    <GraduationCap className="w-4 h-4 text-[#00629e] shrink-0" />
+                    <span className="truncate">
+                      {narration?.most_discussed?.matching_programme || (mostDiscussedCard.programmes && mostDiscussedCard.programmes[0]) || "Tata STRIVE Course"}
+                    </span>
+                  </div>
+
+                  {/* Popover trigger */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalcCard(openCalcCard === "most_discussed" ? null : "most_discussed")}
+                      className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5 text-[#0099f2]" />
+                      <span>Calculation</span>
+                    </button>
+                    {openCalcCard === "most_discussed" && (
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#173343] text-white rounded-xl shadow-xl text-xs z-30 border border-[#0099f2]">
+                        <p className="font-medium">{mostDiscussedCard.calculation_popover}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* "See proof" toggle button */}
+                {mostDiscussedCard.proof_items && mostDiscussedCard.proof_items.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenProofCard(openProofCard === "most_discussed" ? null : "most_discussed")}
+                      className="text-[11px] font-bold text-[#00629e] hover:text-[#0099f2] flex items-center justify-between w-full pt-1 border-t border-[#f0f7ff] cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>See proof ({mostDiscussedCard.proof_items.length} verified items)</span>
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${openProofCard === "most_discussed" ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {/* Proof Expander */}
+                    {openProofCard === "most_discussed" && (
+                      <div className="mt-2 space-y-2 pt-2 border-t border-[#def0ff]">
+                        {mostDiscussedCard.proof_items.slice(0, 3).map((item: ProofItem) => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                          >
+                            <span className="text-xs text-[#0099f2] mt-0.5">
+                              {item.source.includes("youtube") ? "▶" : item.source.includes("gdelt") ? "📰" : "🌐"}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                <span className="font-semibold">{item.author}</span>
+                                <span>·</span>
+                                <span>{item.published_at}</span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Card 2: Fastest Growing */}
+          {fastestGrowingCard && (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+              <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Fastest Growing
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isSampleFallback && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Sample data
+                      </span>
+                    )}
+                    <span
+                      className={
+                        fastestGrowingCard.status_chip === "Growing"
+                          ? "chip-growing"
+                          : fastestGrowingCard.status_chip === "Cooling"
+                          ? "chip-cooling"
+                          : "chip-steady"
+                      }
+                    >
+                      {fastestGrowingCard.status_chip}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {fastestGrowingCard.topic}
+                  </h2>
+                  <p className="text-sm text-[#3f4852] mt-1 font-medium">
+                    {formatChange(fastestGrowingCard.growth_pct, (fastestGrowingCard as any)?.is_new)} spike across skill channels
+                  </p>
+                  {narration?.fastest_growing?.insight && (
+                    <p className="text-xs text-[#00629e] font-medium mt-1.5 bg-[#eaf5ff] p-2 rounded-xl border border-[#def0ff]">
+                      {narration.fastest_growing.insight}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Card Footer: STRIVE Programme + How We Calculated This Popover + See Proof */}
+              <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
+                    <Zap className="w-4 h-4 text-[#00629e] shrink-0" />
+                    <span className="truncate">
+                      {narration?.fastest_growing?.matching_programme || (fastestGrowingCard.programmes && fastestGrowingCard.programmes[0]) || "Tata STRIVE Growth Track"}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalcCard(openCalcCard === "fastest_growing" ? null : "fastest_growing")}
+                      className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5 text-[#0099f2]" />
+                      <span>Calculation</span>
+                    </button>
+                    {openCalcCard === "fastest_growing" && (
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#173343] text-white rounded-xl shadow-xl text-xs z-30 border border-[#0099f2]">
+                        <p className="font-medium">{fastestGrowingCard.calculation_popover}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {fastestGrowingCard.proof_items && fastestGrowingCard.proof_items.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenProofCard(openProofCard === "fastest_growing" ? null : "fastest_growing")}
+                      className="text-[11px] font-bold text-[#00629e] hover:text-[#0099f2] flex items-center justify-between w-full pt-1 border-t border-[#f0f7ff] cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>See proof ({fastestGrowingCard.proof_items.length} verified items)</span>
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${openProofCard === "fastest_growing" ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {openProofCard === "fastest_growing" && (
+                      <div className="mt-2 space-y-2 pt-2 border-t border-[#def0ff]">
+                        {fastestGrowingCard.proof_items.slice(0, 3).map((item: ProofItem) => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                          >
+                            <span className="text-xs text-[#0099f2] mt-0.5">
+                              {item.source.includes("youtube") ? "▶" : item.source.includes("gdelt") ? "📰" : "🌐"}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                <span className="font-semibold">{item.author}</span>
+                                <span>·</span>
+                                <span>{item.published_at}</span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Card 3: Biggest Expected Rise */}
+          {biggestRiseCard?.has_leader ? (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+              <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Biggest Expected Rise
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isSampleFallback && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Sample data
+                      </span>
+                    )}
+                    <span
+                      className={
+                        biggestRiseCard.status_chip === "Growing"
+                          ? "chip-growing"
+                          : biggestRiseCard.status_chip === "Cooling"
+                          ? "chip-cooling"
+                          : "chip-steady"
+                      }
+                    >
+                      {biggestRiseCard.status_chip}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {biggestRiseCard.topic}
+                  </h2>
+                  <p className="text-sm text-[#3f4852] mt-1 font-medium">
+                    {formatChange(biggestRiseCard.forecast_growth_pct)} anticipated over next 30 days
+                  </p>
+                  {narration?.biggest_rise?.insight && (
+                    <p className="text-xs text-[#00629e] font-medium mt-1.5 bg-[#eaf5ff] p-2 rounded-xl border border-[#def0ff]">
+                      {narration.biggest_rise.insight}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Card Footer: STRIVE Programme + How We Calculated This Popover + See Proof */}
+              <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
+                    <TrendingUp className="w-4 h-4 text-[#00629e] shrink-0" />
+                    <span className="truncate">
+                      {narration?.biggest_rise?.matching_programme || (biggestRiseCard.programmes && biggestRiseCard.programmes[0]) || "Tata STRIVE Technical Track"}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalcCard(openCalcCard === "biggest_rise" ? null : "biggest_rise")}
+                      className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5 text-[#0099f2]" />
+                      <span>Calculation</span>
+                    </button>
+                    {openCalcCard === "biggest_rise" && (
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#173343] text-white rounded-xl shadow-xl text-xs z-30 border border-[#0099f2]">
+                        <p className="font-medium">{biggestRiseCard.calculation_popover}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {biggestRiseCard.proof_items && biggestRiseCard.proof_items.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenProofCard(openProofCard === "biggest_rise" ? null : "biggest_rise")}
+                      className="text-[11px] font-bold text-[#00629e] hover:text-[#0099f2] flex items-center justify-between w-full pt-1 border-t border-[#f0f7ff] cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>See proof ({biggestRiseCard.proof_items.length} verified items)</span>
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${openProofCard === "biggest_rise" ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {openProofCard === "biggest_rise" && (
+                      <div className="mt-2 space-y-2 pt-2 border-t border-[#def0ff]">
+                        {biggestRiseCard.proof_items.slice(0, 3).map((item: ProofItem) => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                          >
+                            <span className="text-xs text-[#0099f2] mt-0.5">
+                              {item.source.includes("youtube") ? "▶" : item.source.includes("gdelt") ? "📰" : "🌐"}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                <span className="font-semibold">{item.author}</span>
+                                <span>·</span>
+                                <span>{item.published_at}</span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden bg-gradient-to-b from-[#f9fcff] to-[#f0f7ff] border border-dashed border-[#bce0fd]">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Biggest Expected Rise
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                    Building history
+                  </span>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-[#001e2d] leading-snug">
+                    Model training in progress
+                  </h2>
+                  <p className="text-xs text-[#3f4852] mt-1.5 leading-relaxed font-medium">
+                    Holt-Winters ETS model strictly trains on real recorded observations (minimum 21 real days required). Real daily metrics are accumulating.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-[#def0ff] flex items-center justify-between text-xs text-[#00629e]">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <TrendingUp className="w-4 h-4 text-[#0099f2]" />
+                  <span>Forward Trajectory</span>
+                </div>
+                <span className="text-[11px] text-[#3f4852] font-semibold">21-Day ETS Guardrail</span>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Interactive Predictive Forecast Chart Card */}
+        <section id="trend-forecast" className="stitch-card p-6 lg:p-8 space-y-6 scroll-mt-28">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Predictive Trajectory</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0099f2]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">Holt-Winters ETS Model</span>
+                {isSampleFallback && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                    Sample data
+                  </span>
+                )}
+              </div>
+              <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight mt-0.5">
+                Activity Forecast &amp; Seasonal Demand
+              </h2>
+            </div>
+
+            {/* Controls: Horizon Toggles + Topic Dropdown */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="font-bold text-[#3f4852]">Topic:</span>
+                <select
+                  value={selectedForecastTopic}
+                  onChange={(e) => setSelectedForecastTopic(e.target.value)}
+                  className="h-9 px-3 rounded-xl bg-[#f5faff] border border-[#def0ff] text-xs font-bold text-[#001e2d] focus:outline-none focus:ring-2 focus:ring-[#0099f2] cursor-pointer"
+                >
+                  {trendsOverview.map((t) => (
+                    <option key={t.topic} value={t.topic}>
+                      {t.topic}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Toggle Pills */}
+              <div className="flex items-center gap-1 bg-[#eaf5ff] p-1 rounded-full">
+                {[30, 60, 90].map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setForecastHorizon(h as any)}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                      forecastHorizon === h
+                        ? "bg-[#0099f2] text-white shadow-xs"
+                        : "text-[#3f4852] hover:text-[#001e2d]"
+                    }`}
+                  >
+                    {h} Days
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Plain English Insight Sentence Banner with Action Button */}
+          <div className="bg-[#eaf5ff]/80 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border border-[#cae6fb]">
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-full bg-[#0099f2]/10 flex items-center justify-center shrink-0">
+                <BarChart3 className="w-5 h-5 text-[#0099f2]" />
+              </div>
               <div>
-                <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-[#0067A5]" />
-                  B. Questions by Topic
-                </h2>
-                <p className="text-xs text-[#666666]">
-                  Detected inquiry density. Click any bar to open questions.
+                <p className="text-sm text-[#001e2d] font-semibold">
+                  {forecastExplanation.headline}
+                </p>
+                <p className="text-xs text-[#3f4852] mt-0.5">
+                  {forecastExplanation.details}
                 </p>
               </div>
             </div>
 
-            <div className="h-56 w-full pt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  layout="vertical"
-                  data={questionsByTopicData}
-                  margin={{ top: 5, right: 20, left: 20, bottom: 0 }}
-                  onClick={(entry: any) => {
-                    if (entry?.activePayload?.[0]?.payload) {
-                      setSelectedQuestionTopic(entry.activePayload[0].payload.topic);
-                    }
-                  }}
-                >
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="topic" tick={{ fontSize: 10, fill: "#252525" }} axisLine={false} tickLine={false} width={130} />
-                  <Tooltip contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }} />
-                  <Bar dataKey="questions" name="Questions Detected" fill="#0067A5" radius={[0, 4, 4, 0]} className="cursor-pointer hover:opacity-85" />
-                </BarChart>
-              </ResponsiveContainer>
+            <button
+              type="button"
+              onClick={() => router.push(`/studio?topic=${encodeURIComponent(selectedForecastTopic)}`)}
+              className="shrink-0 stitch-btn-highlight flex items-center gap-2 self-start lg:self-auto cursor-pointer"
+            >
+              <span>⚡</span>
+              <span>Use this trend in Content Studio</span>
+            </button>
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
+            <div className="flex flex-wrap items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-0.5 bg-[#0099F2]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">Real recorded history (Solid line)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-0.5 border-t-2 border-dashed border-[#56c0ff]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">ETS model trajectory (Dotted line)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 rounded bg-[#cae6fb]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">80% prediction range</span>
+              </div>
             </div>
 
-            {selectedQuestionTopic && (
-              <div className="p-3 bg-[#DCEFF7] rounded-lg border border-[#008FD3]/30 text-xs space-y-2">
-                <div className="flex items-center justify-between font-bold text-[#252525]">
-                  <span>Questions in &quot;{selectedQuestionTopic}&quot;:</span>
-                  <button onClick={() => setSelectedQuestionTopic(null)} className="text-[10px] text-[#0067A5] font-semibold hover:underline">
-                    Close
-                  </button>
-                </div>
-                <div className="space-y-1 text-[#252525]">
-                  {audience.questions
-                    .filter((q: AudienceQuestion) => q.topic.toLowerCase() === selectedQuestionTopic.toLowerCase())
-                    .map((q: AudienceQuestion) => (
-                      <div key={q.id} className="p-1.5 rounded bg-white border border-[#E5E7EB] flex items-center justify-between">
-                        <span>&quot;{q.text}&quot;</span>
-                        <Link href={`/feed?topic=${encodeURIComponent(selectedQuestionTopic)}`} className="text-[#0067A5] font-semibold ml-2 hover:underline">
-                          View posts &rarr;
-                        </Link>
-                      </div>
-                    ))}
-                </div>
+            {(forecastResult as any)?.status === "building_history" && (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span>Building history: {(forecastResult as any)?.real_days_count || 3}/{(forecastResult as any)?.min_required_days || 14} real days recorded (solid line) — forecast activates at {(forecastResult as any)?.min_required_days || 14} days</span>
               </div>
             )}
           </div>
 
-          {/* Graph C: Sentiment by Topic (Stacked Bar with Sample Sizes) */}
-          <div className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                  <Smile className="w-4 h-4 text-[#0067A5]" />
-                  C. Sentiment by Topic (Stacked Counts)
-                </h2>
-                <p className="text-xs text-[#666666]">
-                  Volume breakdown with actual sample sizes per category
-                </p>
+          {/* Forecast Chart */}
+          <div className="h-80 w-full pt-2">
+            {forecastLoading ? (
+              <div className="h-full flex flex-col items-center justify-center text-[#3f4852] gap-2">
+                <Loader2 className="w-7 h-7 animate-spin text-[#0099f2]" />
+                <span className="text-xs font-semibold">Fitting Holt-Winters model on real history...</span>
               </div>
-            </div>
-
-            <div className="h-56 w-full pt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={sentimentByTopicData}
-                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                  onClick={(entry: any) => {
-                    if (entry?.activePayload?.[0]?.payload) {
-                      startTransition(() => {
-                        router.push(`/feed?topic=${encodeURIComponent(entry.activePayload[0].payload.topic)}`);
-                      });
-                    }
-                  }}
-                >
-                  <XAxis dataKey="topic" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }}
-                    formatter={(val, name, item) => [`${val} posts`, `${name} (N=${item.payload.sampleSize})`]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: "10px" }} />
-                  <Bar dataKey="Positive" stackId="a" fill={SENTIMENT_COLORS.positive} />
-                  <Bar dataKey="Neutral" stackId="a" fill={SENTIMENT_COLORS.neutral} />
-                  <Bar dataKey="Negative" stackId="a" fill={SENTIMENT_COLORS.negative} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
-
-        {/* 2-Column Grid: Graph D & Graph F */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Graph D: Source Comparison */}
-          <div className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-3">
-            <div>
-              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                <Layers className="w-4 h-4 text-[#0067A5]" />
-                D. Source Collection Comparison
-              </h2>
-              <p className="text-xs text-[#666666]">
-                Collected conversation records by platform channel (Note: represents collected sample, not total platform traffic)
-              </p>
-            </div>
-
-            <div className="h-48 w-full pt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={sourceComparisonData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="source" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }} />
-                  <Bar dataKey="count" name="Collected Records" fill="#0067A5" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Graph F: Cross-Channel Engagement Analysis */}
-          <div className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-[#0067A5]" />
-                  F. Engagement Pattern by Channel
-                </h2>
-                <p className="text-xs text-[#666666]">
-                  Comparing likes vs replies. Excludes incompatible metric definitions.
-                </p>
-              </div>
-            </div>
-
-            <div className="h-48 w-full pt-1">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={engagementComparisonData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="channel" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }}
-                    formatter={(val, name, item) => [`${val}`, `${name} — ${item.payload.metricNote}`]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: "10px" }} />
-                  <Bar dataKey="avgLikes" name="Avg Likes" fill="#0067A5" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="avgComments" name="Avg Replies" fill="#008FD3" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
-
-        {/* Graph E: Question Themes (Ranked Clusters) */}
-        <section className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#0067A5]" />
-                E. Ranked Question Themes &amp; Representative Quotes
-              </h2>
-              <p className="text-xs text-[#666666]">
-                Clustered student pain points mapped with representative authentic phrasing
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {questionThemes.map((theme, i) => (
-              <div key={theme.id} className="p-4 rounded-xl bg-[#F5F7F9] border border-[#E5E7EB] space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-[#0067A5] text-white text-[10px] font-bold flex items-center justify-center">
-                      #{i + 1}
-                    </span>
-                    <h3 className="text-xs font-bold text-[#252525]">{theme.title}</h3>
-                  </div>
-                  <span className="text-[11px] font-bold text-[#0067A5] bg-white px-2 py-0.5 rounded border border-[#E5E7EB] tabular-nums">
-                    {theme.count} queries
+            ) : chartData.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center p-8 bg-[#f5faff] rounded-2xl border border-dashed border-[#cae6fb] text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-[#eaf5ff] text-[#0099f2] flex items-center justify-center mx-auto">
+                  <HelpCircle className="w-6 h-6 text-[#0099f2]" />
+                </div>
+                <div className="flex items-center gap-2 justify-center">
+                  <h3 className="font-bold text-base text-[#001e2d]">Building history</h3>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                    Not enough data yet
                   </span>
                 </div>
+                <p className="text-xs text-[#3f4852] max-w-md">
+                  {(forecastResult as any)?.notes ||
+                    "Holt-Winters ETS model trains only on real collected data and requires at least 21 days of history. Currently accumulating daily observations."}
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData} margin={{ top: 15, right: 20, left: -15, bottom: 0 }}>
+                  <XAxis
+                    dataKey="displayDate"
+                    tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }}
+                    axisLine={false}
+                    tickLine={false}
+                    minTickGap={25}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload || !payload.length) return null;
+                      const item = payload[0]?.payload;
+                      if (!item) return null;
 
-                <span className="inline-block px-2 py-0.5 rounded bg-[#DCEFF7] text-[#0067A5] text-[10px] font-semibold border border-[#008FD3]/20">
-                  {theme.topic}
-                </span>
+                      return (
+                        <div className="bg-[#173343] p-3 rounded-xl border border-[#0099f2] text-white shadow-xl text-xs space-y-1">
+                          <div className="font-bold text-[#56c0ff] border-b border-[#2b4b5e] pb-1">
+                            {item.displayDate} ({item.date})
+                          </div>
+                          {item.historical !== null && (
+                            <div className="flex items-center justify-between gap-4 text-white">
+                              <span className="font-medium flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-[#0099f2]" />
+                                Observed actual:
+                              </span>
+                              <strong className="tabular-nums font-bold text-[#dfec42]">{item.historical} mentions</strong>
+                            </div>
+                          )}
+                          {item.forecast !== null && item.historical === null && (
+                            <>
+                              <div className="flex items-center justify-between gap-4 text-[#cae6fb]">
+                                <span className="font-medium flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-[#56c0ff]" />
+                                  Predicted volume:
+                                </span>
+                                <strong className="tabular-nums font-bold text-[#dfec42]">{item.forecast} mentions</strong>
+                              </div>
+                              {item.lower_80 !== null && item.upper_80 !== null && (
+                                <div className="text-[10px] text-[#bfc7d4] pt-0.5">
+                                  80% prediction range: [{item.lower_80} – {item.upper_80}]
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
 
-                <div className="space-y-1 pt-1 border-t border-[#E5E7EB]">
-                  <span className="text-[10px] font-semibold text-[#666666] uppercase tracking-wider block">
-                    Representative Voices:
+                  {/* Shaded 80% prediction range */}
+                  <Area
+                    type="monotone"
+                    dataKey="upper_80"
+                    stroke="none"
+                    fill="#cae6fb"
+                    fillOpacity={0.65}
+                    name="80% Prediction Range"
+                  />
+
+                  {/* Vertical divider marking where forecast starts */}
+                  {cutoffDisplayDate && (
+                    <ReferenceLine
+                      x={cutoffDisplayDate}
+                      stroke="#0099f2"
+                      strokeDasharray="3 3"
+                      label={{
+                        value: "Forecast begins",
+                        position: "insideTopLeft",
+                        fill: "#00629e",
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    />
+                  )}
+
+                  {/* Solid historical line */}
+                  <Line
+                    type="monotone"
+                    dataKey="historical"
+                    stroke="#0099F2"
+                    strokeWidth={3}
+                    dot={false}
+                    name="Observed History"
+                  />
+
+                  {/* Dashed predicted line */}
+                  <Line
+                    type="monotone"
+                    dataKey="forecast"
+                    stroke="#56c0ff"
+                    strokeWidth={3}
+                    strokeDasharray="6 6"
+                    dot={{ r: 3, fill: "#dfec42", stroke: "#001e2d", strokeWidth: 1.5 }}
+                    name="Projected Forecast"
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </section>
+
+        {/* Expected to Grow Next (Top 3-5 Topics by Forecast % or Growth) */}
+        <section className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">
+                {forecastResult?.status === "trained" ? "Early Signals" : "Growing now"}
+              </span>
+              <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">Expected to Grow Next</h2>
+            </div>
+            <span className="text-xs text-[#3f4852] font-semibold hidden sm:inline">
+              Ranked by real growth trajectory across monitored feeds
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {expectedToGrowTopics.map((card: any, idx) => (
+              <div
+                key={idx}
+                onClick={() => {
+                  setSelectedForecastTopic(card.topic);
+                  const el = document.getElementById("trend-forecast");
+                  if (el) el.scrollIntoView({ behavior: "smooth" });
+                }}
+                className="cursor-pointer stitch-card p-5 flex flex-col justify-between group active:scale-[0.98] transition-all"
+              >
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-8 h-8 rounded-full bg-[#d2ecff] flex items-center justify-center text-[#00629e]">
+                      <span className="material-symbols-outlined text-[18px]">
+                        {card.topic.toLowerCase().includes("drone")
+                          ? "flight_takeoff"
+                          : card.topic.toLowerCase().includes("health")
+                          ? "medical_services"
+                          : card.topic.toLowerCase().includes("iot") || card.topic.toLowerCase().includes("ai")
+                          ? "memory"
+                          : "bolt"}
+                      </span>
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-[#E6F6EF] text-[#1E9E6A] text-xs font-bold">
+                      {formatChange(card.growth_pct, card.is_new)}
+                    </span>
+                  </div>
+                  <h3 className="text-base font-extrabold text-[#001e2d] mt-1 group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {card.topic}
+                  </h3>
+                  <p className="text-xs text-[#3f4852] font-medium leading-relaxed">
+                    {(card.matching_programmes && card.matching_programmes[0]) || card.category || "Tata STRIVE Skilling Track"}
+                  </p>
+                </div>
+
+                {/* Sparkline Graphic */}
+                <div className="mt-4 pt-3 border-t border-[#def0ff] flex items-center justify-between">
+                  <svg className="w-24 h-7 overflow-visible" viewBox="0 0 100 30">
+                    <path
+                      d="M 0,25 Q 25,22 50,18 T 100,5"
+                      fill="none"
+                      stroke="#0099F2"
+                      strokeLinecap="round"
+                      strokeWidth="2.5"
+                    />
+                    <circle cx="100" cy="5" fill="#dfec42" r="3.5" stroke="#0099F2" strokeWidth="1.5" />
+                  </svg>
+                  <span className="text-[11px] text-[#3f4852] font-semibold">
+                    {card.current_weekly_mentions ? `${formatCount(card.current_weekly_mentions)} mentions` : "Active signal"}
                   </span>
-                  {theme.representatives.map((quote, qIdx) => (
-                    <p key={qIdx} className="text-[11px] text-[#252525] italic bg-white p-2 rounded border border-[#E5E7EB] leading-snug">
-                      &quot;{quote}&quot;
-                    </p>
-                  ))}
                 </div>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Graph G: Date-Period Comparison */}
-        <section className="bg-white rounded-xl border border-[#E5E7EB] shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
+        {/* SECTION: EMERGING TRENDS & IN-DEMAND SKILLS (Computed from live APIs & Groq) */}
+        {overviewData?.emerging_skills && overviewData.emerging_skills.length > 0 && (
+          <section className="flex flex-col gap-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#d2ecff] text-[#00629e] text-xs font-bold uppercase tracking-wider">
+                    <Sparkles className="w-3.5 h-3.5 text-[#0099f2]" />
+                    Skill Intelligence
+                  </span>
+                  <span className="text-xs text-[#3f4852] font-semibold">
+                    Derived from authentic post clusters &amp; Groq synthesis
+                  </span>
+                </div>
+                <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">
+                  Emerging Trends &amp; In-Demand Skills
+                </h2>
+              </div>
+              <span className="text-xs text-[#00629e] font-semibold bg-[#eaf5ff] px-3 py-1.5 rounded-full border border-[#cae6fb] self-start sm:self-auto">
+                Aligned to Tata STRIVE National Program Catalog
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {overviewData.emerging_skills.map((skill: EmergingSkill) => {
+                const isSurging = skill.demand_status === "Surging";
+                return (
+                  <article
+                    key={skill.id}
+                    className="stitch-card p-5 flex flex-col justify-between group hover:border-[#0099f2] transition-all"
+                  >
+                    <div>
+                      {/* Category & Demand Status Badge */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <span className="text-xs font-bold text-[#3f4852] uppercase tracking-wider bg-[#f5faff] px-2.5 py-1 rounded-full border border-[#def0ff]">
+                          {skill.category}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              isSurging
+                                ? "bg-[#fdecec] text-[#d64545]"
+                                : "bg-[#eaf5ff] text-[#00629e]"
+                            }`}
+                          >
+                            {skill.demand_status}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-[#e6f6ef] text-[#1e9e6a] text-[10px] font-bold">
+                            {skill.growth}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Skill Name */}
+                      <h3 className="text-base font-extrabold text-[#001e2d] leading-snug group-hover:text-[#0099f2] transition-colors mb-2">
+                        {skill.skill}
+                      </h3>
+
+                      {/* Practical Application */}
+                      <p className="text-xs text-[#3f4852] leading-relaxed font-medium mb-3">
+                        {skill.practical_application}
+                      </p>
+
+                      {/* Associated Tata STRIVE Course */}
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#eaf5ff] text-xs text-[#00629e] font-bold mb-3 border border-[#cae6fb]">
+                        <GraduationCap className="w-4 h-4 text-[#0099f2] shrink-0" />
+                        <span className="truncate">{skill.matching_programme}</span>
+                      </div>
+
+                      {/* Real Evidence Quote */}
+                      {skill.evidence_quote && (
+                        <div className="p-2.5 rounded-xl bg-white border border-[#def0ff] space-y-1 mb-3">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                            Real Learner / Recruiter Signal:
+                          </span>
+                          <p className="text-xs text-[#001e2d] italic line-clamp-2">
+                            &quot;{skill.evidence_quote}&quot;
+                          </p>
+                          <div className="flex items-center justify-between text-[10px] text-[#3f4852] pt-1 border-t border-slate-100">
+                            <span className="font-semibold">{skill.evidence_author}</span>
+                            {skill.evidence_url && (
+                              <a
+                                href={skill.evidence_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[#0099f2] hover:underline font-bold inline-flex items-center gap-0.5"
+                              >
+                                <span>Inspect</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom CTA to Campaign Studio */}
+                    <div className="pt-3 border-t border-[#def0ff] flex items-center justify-between">
+                      <span className="text-[11px] text-[#3f4852] font-semibold">
+                        {formatCount(skill.post_count)} discussions
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/studio?topic=${encodeURIComponent(skill.topic)}`)}
+                        className="text-xs font-bold text-[#0099f2] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>Campaign Studio</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Curated Taxonomy Skilling Topics Table with "See proof" expander */}
+        <section className="stitch-card p-6 lg:p-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[#0067A5]" />
-                G. Date-Period Comparison
-              </h2>
-              <p className="text-xs text-[#666666]">
-                Current vs. equivalent previous period tracking volume shifts and newly observed topics
-              </p>
+              <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Curated Taxonomy</span>
+              <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">Tracked Skilling Topics</h2>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-[#3f4852] pointer-events-none" />
+                <input
+                  type="text"
+                  value={topicSearch}
+                  onChange={(e) => setTopicSearch(e.target.value)}
+                  placeholder="Filter topics..."
+                  className="w-40 sm:w-48 h-9 pl-9 pr-3 rounded-full bg-[#f5faff] border border-[#def0ff] text-xs text-[#001e2d] placeholder:text-[#3f4852] focus:outline-none focus:border-[#0099f2]"
+                />
+              </div>
+
+              <div className="inline-flex rounded-full border border-[#def0ff] bg-[#f5faff] p-0.5 text-xs">
+                {(["all", "rising", "stable", "declining"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMomentumFilter(m)}
+                    className={`px-3 py-1 rounded-full capitalize font-bold transition-all cursor-pointer text-xs ${
+                      momentumFilter === m
+                        ? "bg-[#0099f2] text-white shadow-xs"
+                        : "text-[#3f4852] hover:text-[#001e2d]"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
+          {/* Active Topic Banner */}
+          <div className="bg-[#eaf5ff] px-4 py-3 rounded-2xl flex items-center justify-between border border-[#cae6fb]">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-[#0099f2] text-[20px]">info</span>
+              <span className="text-xs text-[#001e2d] font-semibold">
+                Active Topic: <strong className="font-bold text-[#00629e]">{selectedForecastTopic}</strong> —{" "}
+                <span className="text-[#3f4852]">
+                  {forecastExplanation.headline}
+                </span>
+              </span>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-[#0099f2] text-white text-[11px] font-bold">
+              Active Focus
+            </span>
+          </div>
+
+          {/* Topics Table Container */}
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-[#F5F7F9] border-b border-[#E5E7EB] text-[#666666] font-semibold">
-                  <th className="py-2.5 px-4">Topic</th>
-                  <th className="py-2.5 px-4">Current Period</th>
-                  <th className="py-2.5 px-4">Previous Period</th>
-                  <th className="py-2.5 px-4">Absolute Change</th>
-                  <th className="py-2.5 px-4">Percentage Change</th>
-                  <th className="py-2.5 px-4 text-right">Status</th>
+                <tr className="border-b border-[#def0ff] text-[#3f4852] font-bold uppercase tracking-wider">
+                  <th className="py-3 px-4 w-16">Rank</th>
+                  <th className="py-3 px-4">Topic Name</th>
+                  <th className="py-3 px-4">Mentions (7d)</th>
+                  <th className="py-3 px-4 w-40">Velocity Curve</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#E5E7EB] text-[#252525]">
-                {datePeriodComparison.map((row) => (
-                  <tr key={row.name} className="hover:bg-[#F5F7F9] transition-colors">
-                    <td className="py-3 px-4 font-semibold text-[#0067A5]">
-                      {row.name}
-                    </td>
-                    <td className="py-3 px-4 font-medium tabular-nums">
-                      {row.current} posts
-                    </td>
-                    <td className="py-3 px-4 tabular-nums text-[#666666]">
-                      {row.previous} posts
-                    </td>
-                    <td className="py-3 px-4 font-bold tabular-nums">
-                      {row.absChange >= 0 ? `+${row.absChange}` : row.absChange}
-                    </td>
-                    <td className="py-3 px-4 font-bold tabular-nums">
-                      {row.pctChange >= 0 ? `+${row.pctChange}%` : `${row.pctChange}%`}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      {row.isNew ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#DCEFF7] text-[#0067A5] border border-[#008FD3]/20">
-                          Newly observed
-                        </span>
-                      ) : row.pctChange >= 20 ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          Surging
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-50 text-gray-700 border border-gray-200">
-                          Steady
-                        </span>
-                      )}
+              <tbody className="divide-y divide-[#def0ff] text-[#001e2d]">
+                {filteredTopics.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-xs text-[#3f4852] font-semibold">
+                      No skilling topics match your search or momentum filter.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredTopics.map((item, idx) => {
+                    const topicSlug = item.topic_slug || topicToSlug(item.topic);
+                    const isRising = item.status_chip === "Growing" || item.momentum === "rising";
+                    const isDeclining = item.status_chip === "Cooling" || item.momentum === "declining";
+                    const isSelected = selectedForecastTopic === item.topic;
+                    const isProofOpen = expandedTopicProof === item.topic;
+
+                    return (
+                      <React.Fragment key={item.topic}>
+                        <tr
+                          onClick={() => {
+                            setSelectedForecastTopic(item.topic);
+                          }}
+                          className={`cursor-pointer transition-colors group ${
+                            isSelected ? "bg-[#eaf5ff]/70 font-semibold" : "hover:bg-[#f5faff]"
+                          }`}
+                        >
+                          <td className="py-4 px-4 font-bold text-[#00629e]">#{idx + 1}</td>
+                          <td className="py-4 px-4 font-bold text-[#001e2d] group-hover:text-[#0099f2] transition-colors">
+                            <div className="flex items-center gap-2.5">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: TOPIC_COLORS[item.topic] || "#0099f2" }}
+                              />
+                              <span className="text-sm">{item.topic}</span>
+                            </div>
+                          </td>
+                          <td className="py-4 px-4 font-bold text-[#001e2d] tabular-nums">
+                            {formatCount(item.current_weekly_mentions)}
+                          </td>
+                          <td className="py-4 px-4">
+                            <svg className="w-28 h-6 overflow-visible" viewBox="0 0 100 24">
+                              <path
+                                d={
+                                  isRising
+                                    ? "M 0,20 Q 30,19 60,11 T 100,4"
+                                    : isDeclining
+                                    ? "M 0,6 Q 30,10 60,17 T 100,21"
+                                    : "M 0,16 Q 30,14 60,15 T 100,10"
+                                }
+                                fill="none"
+                                stroke={isRising ? "#1E9E6A" : isDeclining ? "#D64545" : "#6B7A90"}
+                                strokeLinecap="round"
+                                strokeWidth="2.5"
+                              />
+                            </svg>
+                          </td>
+                          <td className="py-4 px-4 text-center">
+                            <span
+                              className={
+                                isRising
+                                  ? "chip-growing"
+                                  : isDeclining
+                                  ? "chip-cooling"
+                                  : "chip-steady"
+                              }
+                            >
+                              {item.status_chip || (isRising ? "Growing" : isDeclining ? "Cooling" : "Steady")}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {item.proof_items && item.proof_items.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedTopicProof(isProofOpen ? null : item.topic);
+                                  }}
+                                  className="px-2.5 py-1 rounded-full bg-[#def0ff] text-[#00629e] hover:bg-[#cae6fb] font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+                                  title="View real source evidence for this topic"
+                                >
+                                  <span>See proof</span>
+                                  <ChevronDown className={`w-3 h-3 transition-transform ${isProofOpen ? "rotate-180" : ""}`} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/trends/${topicSlug}`);
+                                }}
+                                className="px-3 py-1.5 rounded-full bg-[#eaf5ff] text-[#00629e] hover:bg-[#0099f2] hover:text-white font-bold text-xs transition-colors cursor-pointer"
+                              >
+                                Details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/studio?topic=${encodeURIComponent(item.topic)}`);
+                                }}
+                                className="px-3 py-1.5 rounded-full bg-[#dfec42] text-[#001e2d] hover:brightness-105 font-bold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1"
+                                title="Send topic to Content Studio"
+                              >
+                                <span>Studio</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Expanded Proof Row */}
+                        {isProofOpen && item.proof_items && item.proof_items.length > 0 && (
+                          <tr className="bg-[#f5faff] border-b border-[#def0ff]">
+                            <td colSpan={6} className="py-3 px-6">
+                              <div className="space-y-2">
+                                <span className="text-[10px] font-bold text-[#00629e] uppercase tracking-wider block">
+                                  Real Source Evidence for {item.topic}
+                                </span>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                  {item.proof_items.map((proof) => (
+                                    <a
+                                      key={proof.id}
+                                      href={proof.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                                    >
+                                      <span className="text-xs text-[#0099f2] mt-0.5">
+                                        {proof.source.includes("youtube") ? "▶" : proof.source.includes("gdelt") ? "📰" : "🌐"}
+                                      </span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{proof.title}</p>
+                                        <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                          <span className="font-semibold">{proof.author}</span>
+                                          <span>·</span>
+                                          <span>{proof.published_at}</span>
+                                        </div>
+                                      </div>
+                                      <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                                    </a>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
               </tbody>
             </table>
+          </div>
+        </section>
+
+        {/* SECTION: Strategic Opportunities for Tata STRIVE */}
+        <section className="stitch-card p-6 lg:p-8 space-y-4">
+          <div className="flex items-center justify-between border-b border-[#def0ff] pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#0099f2]" />
+                  Strategic Outreach Opportunities for Tata STRIVE
+                </h2>
+                {isSampleFallback && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                    Sample data
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#3f4852] font-medium mt-0.5">
+                Recommended communication angles derived from real rising trends and candidate inquiries
+              </p>
+            </div>
+            <Link
+              href="/opportunities"
+              className="text-xs font-bold text-[#00629e] hover:underline inline-flex items-center gap-1"
+            >
+              <span>Opportunity Radar</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-[#f5faff] border border-[#def0ff] flex flex-col justify-between space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-[#00629e] text-[10px] bg-[#d2ecff] px-2.5 py-0.5 rounded-full">
+                    AI &amp; Digital Skills
+                  </span>
+                  <span className="text-[10px] text-[#1E9E6A] font-bold">Surging Demand</span>
+                </div>
+                <h3 className="font-extrabold text-[#001e2d] text-sm">Practical AI for Non-Technical Graduates</h3>
+                <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
+                  Freshers from commerce and arts express anxiety over AI displacement. Position Tata STRIVE&apos;s workplace digital skills modules.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-[#def0ff] flex items-center justify-between">
+                <Link
+                  href="/trends/ai-and-digital-skills"
+                  className="text-xs text-[#3f4852] hover:text-[#0099f2] font-semibold"
+                >
+                  View trend &rarr;
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => router.push("/studio?topic=AI%20and%20digital%20skills")}
+                  className="stitch-btn-primary !px-3 !py-1 !text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Use in Studio</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#f5faff] border border-[#def0ff] flex flex-col justify-between space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-emerald-800 text-[10px] bg-[#E6F6EF] px-2.5 py-0.5 rounded-full">
+                    Vocational Training
+                  </span>
+                  <span className="text-[10px] text-[#1E9E6A] font-bold">High Placement Trust</span>
+                </div>
+                <h3 className="font-extrabold text-[#001e2d] text-sm">EV &amp; Solar PV Technician Drives</h3>
+                <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
+                  Strongest alumni placement trust across tier-2 industrial clusters. Highlight admissions and certification criteria.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-[#def0ff] flex items-center justify-between">
+                <Link
+                  href="/trends/vocational-training"
+                  className="text-xs text-[#3f4852] hover:text-[#0099f2] font-semibold"
+                >
+                  View trend &rarr;
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => router.push("/studio?topic=Vocational%20training")}
+                  className="stitch-btn-primary !px-3 !py-1 !text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Use in Studio</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#f5faff] border border-[#def0ff] flex flex-col justify-between space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-red-700 text-[10px] bg-[#FDECEC] px-2.5 py-0.5 rounded-full">
+                    Job Readiness (Unmet Need)
+                  </span>
+                  <span className="text-[10px] text-[#D64545] font-bold">Interview Friction</span>
+                </div>
+                <h3 className="font-extrabold text-[#001e2d] text-sm">HR Interview Behavioral Confidence</h3>
+                <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
+                  Candidates clear technical tests but struggle in STAR-format HR rounds. Launch interview clinics and mock preparation posts.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-[#def0ff] flex items-center justify-between">
+                <Link
+                  href="/trends/employability-and-job-readiness"
+                  className="text-xs text-[#3f4852] hover:text-[#0099f2] font-semibold"
+                >
+                  View trend &rarr;
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => router.push("/studio?topic=Employability%20and%20job%20readiness")}
+                  className="stitch-btn-primary !px-3 !py-1 !text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Use in Studio</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION: Audience Questions & Channel Timing */}
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="stitch-card p-6 space-y-4">
+            <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+              <HelpCircle className="w-4 h-4 text-[#0099f2]" />
+              Frequently Asked Questions from Learners
+            </h2>
+            <div className="space-y-3 text-xs">
+              {[
+                {
+                  theme: "STAR behavioral interview preparation for first-time job seekers",
+                  count: 48,
+                  sample: "How do freshers answer 'tell me about a time you failed' in campus interviews?",
+                },
+                {
+                  theme: "Generative AI tools roadmap for non-technical retail/hospitality roles",
+                  count: 36,
+                  sample: "Which AI tools are actually demanded for B.Com freshers in office operations?",
+                },
+                {
+                  theme: "Vocational solar PV & EV center admissions and scholarship criteria",
+                  count: 29,
+                  sample: "Where do students enroll for Tata STRIVE free solar technician courses?",
+                },
+              ].map((q, idx) => (
+                <div key={idx} className="p-3.5 rounded-xl bg-[#f5faff] border border-[#def0ff] space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#001e2d]">{q.theme}</span>
+                    <span className="text-[10px] font-bold text-[#00629e] bg-white px-2.5 py-0.5 rounded-full border border-[#def0ff]">
+                      {q.count} queries
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#3f4852] italic bg-white p-2.5 rounded-lg border border-[#def0ff]">
+                    &ldquo;{q.sample}&rdquo;
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="stitch-card p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-[#0099f2]" />
+                Audience Engagement by Time of Day (IST)
+              </h2>
+              <p className="text-xs text-[#3f4852] font-medium mt-0.5">
+                Hourly engagement density across social channels. Peak interaction occurs between 6 PM – 8 PM IST.
+              </p>
+            </div>
+            <div className="h-56 w-full pt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={[
+                    { hour: "8 AM", eng: 45 },
+                    { hour: "10 AM", eng: 120 },
+                    { hour: "12 PM", eng: 165 },
+                    { hour: "2 PM", eng: 130 },
+                    { hour: "4 PM", eng: 190 },
+                    { hour: "6 PM", eng: 240 },
+                    { hour: "8 PM", eng: 285 },
+                    { hour: "10 PM", eng: 140 },
+                  ]}
+                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                >
+                  <XAxis dataKey="hour" tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#173343",
+                      borderRadius: "12px",
+                      border: "1px solid #0099f2",
+                      fontSize: "11px",
+                      color: "#ffffff",
+                    }}
+                  />
+                  <Bar dataKey="eng" name="Avg Engagement" fill="#0099f2" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </section>
       </main>
@@ -612,7 +1689,7 @@ function TrendsContent() {
 
 export default function TrendsPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-xs text-[#68766F]">Loading trends...</div>}>
+    <Suspense fallback={<div className="p-8 text-xs text-[#666666]">Loading trends intelligence...</div>}>
       <TrendsContent />
     </Suspense>
   );

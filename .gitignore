@@ -30,3 +30,20 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Databases & generated reports
+*.db
+*.sqlite
+*.sqlite3
+backend/data/reports/*.csv
+backend/data/*_cache.json
+
+# Temporary scratch & tests
+scratch/
