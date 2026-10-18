@@ -48,6 +48,8 @@ import {
   Cpu,
   Info,
   ExternalLink,
+  GraduationCap,
+  Zap,
 } from "lucide-react";
 
 // Standard Tata STRIVE category indicator colors
@@ -487,7 +489,7 @@ function TrendsContent() {
               <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
-                    <span className="material-symbols-outlined text-[16px]">school</span>
+                    <GraduationCap className="w-4 h-4 text-[#00629e] shrink-0" />
                     <span className="truncate">
                       {narration?.most_discussed?.matching_programme || (mostDiscussedCard.programmes && mostDiscussedCard.programmes[0]) || "Tata STRIVE Course"}
                     </span>
@@ -607,7 +609,7 @@ function TrendsContent() {
               <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
-                    <span className="material-symbols-outlined text-[16px]">bolt</span>
+                    <Zap className="w-4 h-4 text-[#00629e] shrink-0" />
                     <span className="truncate">
                       {narration?.fastest_growing?.matching_programme || (fastestGrowingCard.programmes && fastestGrowingCard.programmes[0]) || "Tata STRIVE Growth Track"}
                     </span>
@@ -724,7 +726,7 @@ function TrendsContent() {
               <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
-                    <span className="material-symbols-outlined text-[16px]">trending_up</span>
+                    <TrendingUp className="w-4 h-4 text-[#00629e] shrink-0" />
                     <span className="truncate">
                       {narration?.biggest_rise?.matching_programme || (biggestRiseCard.programmes && biggestRiseCard.programmes[0]) || "Tata STRIVE Technical Track"}
                     </span>
@@ -796,7 +798,7 @@ function TrendsContent() {
         </section>
 
         {/* Interactive Predictive Forecast Chart Card */}
-        <section id="trend-forecast" className="stitch-card p-6 lg:p-8 space-y-6">
+        <section id="trend-forecast" className="stitch-card p-6 lg:p-8 space-y-6 scroll-mt-28">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -855,7 +857,7 @@ function TrendsContent() {
           <div className="bg-[#eaf5ff]/80 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border border-[#cae6fb]">
             <div className="flex items-center gap-3.5">
               <div className="w-10 h-10 rounded-full bg-[#0099f2]/10 flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-[#0099f2] text-[22px]">auto_graph</span>
+                <BarChart3 className="w-5 h-5 text-[#0099f2]" />
               </div>
               <div>
                 <p className="text-sm text-[#001e2d] font-semibold">
@@ -878,19 +880,28 @@ function TrendsContent() {
           </div>
 
           {/* Legend */}
-          <div className="flex flex-wrap items-center gap-6 pt-1">
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-0.5 bg-[#0099F2]"></span>
-              <span className="text-xs text-[#3f4852] font-semibold">Real recorded history (Solid line)</span>
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
+            <div className="flex flex-wrap items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-0.5 bg-[#0099F2]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">Real recorded history (Solid line)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-4 h-0.5 border-t-2 border-dashed border-[#56c0ff]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">ETS model trajectory (Dotted line)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3.5 h-3.5 rounded bg-[#cae6fb]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">80% prediction range</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-0.5 border-t-2 border-dashed border-[#56c0ff]"></span>
-              <span className="text-xs text-[#3f4852] font-semibold">ETS model trajectory (Dotted line)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded bg-[#cae6fb]"></span>
-              <span className="text-xs text-[#3f4852] font-semibold">80% prediction range</span>
-            </div>
+
+            {(forecastResult as any)?.status === "building_history" && (
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span>Building history: {(forecastResult as any)?.real_days_count || 3}/21 real days recorded (solid line) — forecast activates at 21 days</span>
+              </div>
+            )}
           </div>
 
           {/* Forecast Chart */}
@@ -900,10 +911,10 @@ function TrendsContent() {
                 <Loader2 className="w-7 h-7 animate-spin text-[#0099f2]" />
                 <span className="text-xs font-semibold">Fitting Holt-Winters model on real history...</span>
               </div>
-            ) : (forecastResult as any)?.status === "building_history" ? (
+            ) : chartData.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center p-8 bg-[#f5faff] rounded-2xl border border-dashed border-[#cae6fb] text-center space-y-3">
                 <div className="w-12 h-12 rounded-full bg-[#eaf5ff] text-[#0099f2] flex items-center justify-center mx-auto">
-                  <span className="material-symbols-outlined text-[24px]">hourglass_top</span>
+                  <HelpCircle className="w-6 h-6 text-[#0099f2]" />
                 </div>
                 <div className="flex items-center gap-2 justify-center">
                   <h3 className="font-bold text-base text-[#001e2d]">Building history</h3>
@@ -915,10 +926,6 @@ function TrendsContent() {
                   {(forecastResult as any)?.notes ||
                     "Holt-Winters ETS model trains only on real collected data and requires at least 21 days of history. Currently accumulating daily observations."}
                 </p>
-              </div>
-            ) : chartData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-xs text-[#3f4852] font-semibold">
-                Not enough data yet for this topic.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">

@@ -171,20 +171,44 @@ class TrendStorage:
         self.observations.append(obs)
         self._save()
 
+    def get_topic_aliases(self, topic: str) -> List[str]:
+        """Resolves all aliases, legacy labels, and slugs for a canonical topic."""
+        from .taxonomy import TOPIC_ALIASES, topic_to_slug
+        aliases = {topic, topic_to_slug(topic), topic.lower()}
+        for k, v in TOPIC_ALIASES.items():
+            if v == topic or v.lower() == topic.lower():
+                aliases.add(k)
+                aliases.add(k.lower())
+        return list(aliases)
+
     def get_topic_series(self, topic: str, days: int = 90) -> List[DailyObservation]:
         """Retrieve chronological daily observations for a topic directly from SQLite or baseline."""
         from ..db import get_db_connection, get_total_posts_count
         topic_slug = topic_to_slug(topic)
+        aliases = self.get_topic_aliases(topic)
 
+        total_stored = get_total_posts_count()
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT date, topic_name, mentions, youtube_count, gdelt_count, engagement,
-                   positive_count, neutral_count, negative_count, sentiment_score, is_simulated
-            FROM daily_topic_metrics
-            WHERE (topic_id = ? OR topic_name = ?)
-            ORDER BY date ASC
-        """, (topic_slug, topic))
+        ph = ",".join("?" for _ in aliases)
+
+        if total_stored >= 30:
+            # Query ONLY real recorded metrics (is_simulated = 0)
+            cursor.execute(f"""
+                SELECT date, topic_name, mentions, youtube_count, gdelt_count, engagement,
+                       positive_count, neutral_count, negative_count, sentiment_score, is_simulated
+                FROM daily_topic_metrics
+                WHERE (topic_id IN ({ph}) OR topic_name IN ({ph})) AND is_simulated = 0
+                ORDER BY date ASC
+            """, aliases + aliases)
+        else:
+            cursor.execute(f"""
+                SELECT date, topic_name, mentions, youtube_count, gdelt_count, engagement,
+                       positive_count, neutral_count, negative_count, sentiment_score, is_simulated
+                FROM daily_topic_metrics
+                WHERE (topic_id IN ({ph}) OR topic_name IN ({ph}))
+                ORDER BY date ASC
+            """, aliases + aliases)
         rows = cursor.fetchall()
         conn.close()
 
@@ -210,7 +234,6 @@ class TrendStorage:
             return obs
 
         # If SQLite has no metric rows and < 30 total posts, fallback to baseline
-        total_stored = get_total_posts_count()
         if total_stored < 30:
             filtered = [o for o in self.observations if o.topic == topic or topic_to_slug(o.topic) == topic_slug]
             filtered.sort(key=lambda x: x.date)
@@ -221,18 +244,19 @@ class TrendStorage:
         return []
 
     def get_proof_items_for_topic(self, topic: str, limit: int = 3) -> List[Dict[str, Any]]:
-        """Queries 2-3 real evidence posts from SQLite for this topic."""
+        """Queries 2-3 real evidence posts from SQLite for this topic using canonical aliases."""
         from ..db import get_db_connection
-        topic_slug = topic_to_slug(topic)
+        aliases = self.get_topic_aliases(topic)
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("""
+        ph = ",".join("?" for _ in aliases)
+        cursor.execute(f"""
             SELECT id, source, author, text, url, published_at, likes, comments
             FROM posts
-            WHERE topic_id = ? OR topic_name = ?
+            WHERE topic_id IN ({ph}) OR topic_name IN ({ph})
             ORDER BY (likes + comments) DESC, published_at DESC
             LIMIT ?
-        """, (topic_slug, topic, limit))
+        """, aliases + aliases + [limit])
         rows = cursor.fetchall()
         conn.close()
 
@@ -250,13 +274,20 @@ class TrendStorage:
 
     def get_all_topics_current_summary(self) -> List[Dict[str, Any]]:
         """Calculate current metrics, 7-day growth, status chip, proof items, and sentiment for all topics."""
+        from ..db import get_total_posts_count
         from .tatastrive_catalog import get_matching_strive_programmes
         summary = []
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+        total_stored = get_total_posts_count()
         for topic in TOPIC_CATEGORIES:
             series = self.get_topic_series(topic, days=30)
-            if not series:
+            proof_items = self.get_proof_items_for_topic(topic, limit=3)
+
+            # When real data is active (>= 30 posts), omit empty unmentioned topics
+            if total_stored >= 30 and not series and not proof_items:
+                continue
+            if not series and not proof_items:
                 continue
 
             # Recent 7 days vs previous 7 days
@@ -264,6 +295,8 @@ class TrendStorage:
             prev_7 = series[-14:-7] if len(series) >= 14 else []
 
             recent_vol = sum(o.mentions for o in recent_7)
+            if recent_vol == 0 and proof_items:
+                recent_vol = len(proof_items)
             prev_vol = sum(o.mentions for o in prev_7) if prev_7 else 0
 
             is_new = (prev_vol == 0 and recent_vol > 0)
@@ -374,7 +407,8 @@ class TrendStorage:
             key=lambda x: (x["growth_pct"] if not x.get("is_new") else 999.0),
             reverse=True
         )
-        fg_item = sorted_by_growth[0] if sorted_by_growth else md_item
+        other_growth = [t for t in sorted_by_growth if md_item is None or t["topic"] != md_item["topic"]]
+        fg_item = other_growth[0] if other_growth else (sorted_by_growth[0] if sorted_by_growth else md_item)
 
         fastest_growing = None
         if fg_item:

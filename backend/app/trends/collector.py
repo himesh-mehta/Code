@@ -21,12 +21,13 @@ import re
 import json
 import logging
 import asyncio
+import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 import httpx
 
 from ..db import insert_posts_batch, upsert_daily_metrics, get_db_connection
-from .taxonomy import classify_text_to_topic, TAXONOMY_RULES, TOPIC_CATEGORIES
+from .taxonomy import classify_text_to_topic, TAXONOMY_RULES, TOPIC_CATEGORIES, TOPIC_ALIASES, topic_to_slug
 from .tatastrive_catalog import fetch_tatastrive_public_content
 from .groq_classifier import classify_and_enrich_posts
 
@@ -35,6 +36,7 @@ logger = logging.getLogger("pulse_collector")
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 GDELT_CACHE_FILE = os.path.join(DATA_DIR, "gdelt_cache.json")
 GDELT_CACHE_TTL_SECONDS = 3600  # 1 hour
+_gdelt_unavailable_until: float = 0.0
 
 YOUTUBE_API_KEY = (
     os.environ.get("YOUTUBE_API_KEY")
@@ -163,7 +165,7 @@ async def fetch_top_video_comments(
 async def collect_youtube_posts(max_per_query: int = 4) -> List[Dict[str, Any]]:
     """
     Collects real YouTube videos (publishedAfter = last 30 days) and statistics,
-    plus top comments for top videos.
+    plus top comments for top videos, using parallel HTTP requests.
     """
     if not YOUTUBE_API_KEY:
         SOURCE_STATUS["youtube"] = {"status": "unavailable", "count": 0, "last_sync": None, "note": "Missing YOUTUBE_API_KEY"}
@@ -174,8 +176,8 @@ async def collect_youtube_posts(max_per_query: int = 4) -> List[Dict[str, Any]]:
     headers = {"User-Agent": "SocialPulse-Collector/1.0"}
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for q, default_topic in SEARCH_QUERIES[:6]:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            async def search_single(q: str):
                 search_url = (
                     f"https://www.googleapis.com/youtube/v3/search"
                     f"?part=snippet&type=video&maxResults={max_per_query}"
@@ -184,76 +186,79 @@ async def collect_youtube_posts(max_per_query: int = 4) -> List[Dict[str, Any]]:
                 )
                 try:
                     res = await client.get(search_url, headers=headers)
-                    if res.status_code == 403:
-                        logger.warning("YouTube quota exceeded or restricted.")
-                        SOURCE_STATUS["youtube"] = {"status": "degraded", "count": len(collected_posts), "last_sync": datetime.now(timezone.utc).isoformat(), "note": "Quota reached"}
-                        break
-                    if not res.is_success:
-                        continue
+                    if res.status_code in [403, 429]:
+                        return "quota", []
+                    if res.is_success:
+                        return "ok", res.json().get("items", [])
+                except Exception:
+                    pass
+                return "error", []
 
-                    items = res.json().get("items", [])
-                    video_ids = [it["id"]["videoId"] for it in items if "id" in it and "videoId" in it["id"]]
+            search_jobs = await asyncio.gather(*[search_single(q) for q, _ in SEARCH_QUERIES[:4]], return_exceptions=True)
+            quota_hit = False
+            raw_items = []
+            for job in search_jobs:
+                if isinstance(job, tuple):
+                    st, items = job
+                    if st == "quota":
+                        quota_hit = True
+                    raw_items.extend(items)
 
-                    stats_map = {}
-                    if video_ids:
-                        stats_url = (
-                            f"https://www.googleapis.com/youtube/v3/videos"
-                            f"?part=statistics&id={','.join(video_ids)}&key={YOUTUBE_API_KEY}"
-                        )
-                        stats_res = await client.get(stats_url, headers=headers)
-                        if stats_res.is_success:
-                            for s_item in stats_res.json().get("items", []):
-                                st = s_item.get("statistics", {})
-                                stats_map[s_item["id"]] = {
-                                    "likes": int(st.get("likeCount", 0)),
-                                    "comments": int(st.get("commentCount", 0)),
-                                    "views": int(st.get("viewCount", 0)),
-                                }
+            if quota_hit and not raw_items:
+                SOURCE_STATUS["youtube"] = {"status": "degraded", "count": 0, "last_sync": datetime.now(timezone.utc).isoformat(), "note": "Quota reached"}
+                return []
 
-                    for it_idx, it in enumerate(items):
-                        vid_id = it.get("id", {}).get("videoId")
-                        if not vid_id:
-                            continue
-                        snip = it.get("snippet", {})
-                        title = snip.get("title", "")
-                        desc = snip.get("description", "")
-                        full_content = f"{title}\n\n{desc}".strip()
-                        topic_name, topic_slug, _ = classify_text_to_topic(title, desc)
-                        sent, sent_score = infer_sentiment_lexical(full_content)
-                        st = stats_map.get(vid_id, {"likes": 0, "comments": 0, "views": 0})
-                        thumb = snip.get("thumbnails", {}).get("high", {}).get("url") or f"https://img.youtube.com/vi/{vid_id}/hqdefault.jpg"
+            video_ids = [it["id"]["videoId"] for it in raw_items if "id" in it and "videoId" in it["id"]][:15]
+            stats_map = {}
+            if video_ids:
+                try:
+                    stats_url = (
+                        f"https://www.googleapis.com/youtube/v3/videos"
+                        f"?part=statistics&id={','.join(video_ids)}&key={YOUTUBE_API_KEY}"
+                    )
+                    stats_res = await client.get(stats_url, headers=headers)
+                    if stats_res.is_success:
+                        for s_item in stats_res.json().get("items", []):
+                            st = s_item.get("statistics", {})
+                            stats_map[s_item["id"]] = {
+                                "likes": int(st.get("likeCount", 0)),
+                                "comments": int(st.get("commentCount", 0)),
+                                "views": int(st.get("viewCount", 0)),
+                            }
+                except Exception:
+                    pass
 
-                        video_post = {
-                            "id": f"yt_{vid_id}",
-                            "source": "youtube",
-                            "author": f"@{snip.get('channelTitle', 'YouTubeCreator').replace(' ', '')}",
-                            "text": full_content,
-                            "url": f"https://www.youtube.com/watch?v={vid_id}",
-                            "published_at": snip.get("publishedAt") or datetime.now(timezone.utc).isoformat(),
-                            "likes": st["likes"],
-                            "comments": st["comments"],
-                            "shares": 0,
-                            "topic_id": topic_slug,
-                            "topic_name": topic_name,
-                            "sentiment": sent,
-                            "sentiment_score": sent_score,
-                            "is_question": is_question_text(full_content),
-                            "media_url": thumb,
-                            "video_id": vid_id,
-                        }
-                        collected_posts.append(video_post)
-
-                        # Fetch comments for top 2 videos per query
-                        if it_idx < 2 and st["comments"] > 0:
-                            comm_posts = await fetch_top_video_comments(client, vid_id, max_comments=3)
-                            for cp in comm_posts:
-                                cp["topic_id"] = topic_slug
-                                cp["topic_name"] = topic_name
-                                collected_posts.append(cp)
-
-                except Exception as e:
-                    logger.warning(f"Error querying YouTube for '{q}': {e}")
+            for it in raw_items:
+                vid_id = it.get("id", {}).get("videoId")
+                if not vid_id:
                     continue
+                snip = it.get("snippet", {})
+                title = snip.get("title", "")
+                desc = snip.get("description", "")
+                full_content = f"{title}\n\n{desc}".strip()
+                topic_name, topic_slug, _ = classify_text_to_topic(title, desc)
+                sent, sent_score = infer_sentiment_lexical(full_content)
+                st = stats_map.get(vid_id, {"likes": 0, "comments": 0, "views": 0})
+                thumb = snip.get("thumbnails", {}).get("high", {}).get("url") or f"https://img.youtube.com/vi/{vid_id}/hqdefault.jpg"
+
+                collected_posts.append({
+                    "id": f"yt_{vid_id}",
+                    "source": "youtube",
+                    "author": f"@{snip.get('channelTitle', 'YouTubeCreator').replace(' ', '')}",
+                    "text": full_content,
+                    "url": f"https://www.youtube.com/watch?v={vid_id}",
+                    "published_at": snip.get("publishedAt") or datetime.now(timezone.utc).isoformat(),
+                    "likes": st["likes"],
+                    "comments": st["comments"],
+                    "shares": 0,
+                    "topic_id": topic_slug,
+                    "topic_name": topic_name,
+                    "sentiment": sent,
+                    "sentiment_score": sent_score,
+                    "is_question": is_question_text(full_content),
+                    "media_url": thumb,
+                    "video_id": vid_id,
+                })
 
         SOURCE_STATUS["youtube"] = {
             "status": "online" if collected_posts else "degraded",
@@ -298,9 +303,10 @@ def save_gdelt_cache(posts: List[Dict[str, Any]]):
 async def collect_gdelt_posts() -> List[Dict[str, Any]]:
     """
     Collects news articles from GDELT DOC 2.0 (artlist mode).
-    Handles 'degraded' status with 8s timeout, 2 exponential backoff retries, and 1-hour cache.
-    If fails, records status 'unavailable' and continues gracefully.
+    Handles 'degraded' status with circuit breaker, 3.5s timeout, and 1-hour cache.
+    If fails or returns 503, records status 'unavailable' and continues gracefully without blocking.
     """
+    global _gdelt_unavailable_until
     cached = load_gdelt_cache()
     if cached:
         logger.info(f"Using 1-hour cached GDELT data ({len(cached)} articles).")
@@ -312,6 +318,17 @@ async def collect_gdelt_posts() -> List[Dict[str, Any]]:
         }
         return cached
 
+    now_ts = time.time()
+    if now_ts < _gdelt_unavailable_until:
+        logger.info("GDELT DOC 2.0 circuit breaker active (degraded). Skipping live calls.")
+        SOURCE_STATUS["gdelt"] = {
+            "status": "unavailable",
+            "count": 0,
+            "last_sync": None,
+            "note": "GDELT DOC 2.0 degraded/unavailable",
+        }
+        return []
+
     queries = [
         "Tata STRIVE skill development",
         "vocational education training India",
@@ -321,65 +338,66 @@ async def collect_gdelt_posts() -> List[Dict[str, Any]]:
     collected: List[Dict[str, Any]] = []
     base_url = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        for q in queries:
-            success = False
-            for attempt in range(2):  # 2 retries with backoff
+    try:
+        async with httpx.AsyncClient(timeout=3.5) as client:
+            async def fetch_gdelt_single(q: str):
+                params = {"query": q, "mode": "artlist", "maxrecords": "5", "format": "json"}
                 try:
-                    params = {
-                        "query": q,
-                        "mode": "artlist",
-                        "maxrecords": "5",
-                        "format": "json"
-                    }
                     res = await client.get(base_url, params=params)
+                    if res.status_code in [500, 502, 503, 504]:
+                        return "degraded", []
                     if res.is_success:
-                        try:
-                            articles = res.json().get("articles", [])
-                            for a in articles:
-                                title = a.get("title", "")
-                                url = a.get("url", "")
-                                if not title or not url:
-                                    continue
-                                domain = a.get("domain", "National Media")
-                                seendate = a.get("seendate", "")
-                                pub_date = datetime.now(timezone.utc).isoformat()
-                                if len(seendate) >= 8:
-                                    try:
-                                        pub_date = datetime.strptime(seendate[:8], "%Y%m%d").replace(tzinfo=timezone.utc).isoformat()
-                                    except Exception:
-                                        pass
+                        return "ok", res.json().get("articles", [])
+                except Exception:
+                    pass
+                return "error", []
 
-                                topic_name, topic_slug, _ = classify_text_to_topic(title)
-                                sent, sent_score = infer_sentiment_lexical(title)
+            results = await asyncio.gather(*[fetch_gdelt_single(q) for q in queries], return_exceptions=True)
+            degraded_hit = False
+            for r in results:
+                if isinstance(r, tuple):
+                    status, articles = r
+                    if status == "degraded":
+                        degraded_hit = True
+                    for a in articles:
+                        title = a.get("title", "")
+                        url = a.get("url", "")
+                        if not title or not url:
+                            continue
+                        domain = a.get("domain", "National Media")
+                        seendate = a.get("seendate", "")
+                        pub_date = datetime.now(timezone.utc).isoformat()
+                        if len(seendate) >= 8:
+                            try:
+                                pub_date = datetime.strptime(seendate[:8], "%Y%m%d").replace(tzinfo=timezone.utc).isoformat()
+                            except Exception:
+                                pass
 
-                                collected.append({
-                                    "id": f"gdelt_{abs(hash(url))%1000000}",
-                                    "source": "gdelt",
-                                    "author": domain,
-                                    "text": title,
-                                    "url": url,
-                                    "published_at": pub_date,
-                                    "likes": 0,
-                                    "comments": 0,
-                                    "shares": 0,
-                                    "topic_id": topic_slug,
-                                    "topic_name": topic_name,
-                                    "sentiment": sent,
-                                    "sentiment_score": sent_score,
-                                    "is_question": is_question_text(title),
-                                })
-                            success = True
-                            break
-                        except Exception:
-                            pass
-                except httpx.TimeoutException:
-                    logger.warning(f"GDELT DOC 2.0 timed out on attempt {attempt + 1} for '{q}'")
-                except Exception as e:
-                    logger.warning(f"GDELT error on attempt {attempt + 1}: {e}")
+                        topic_name, topic_slug, _ = classify_text_to_topic(title)
+                        sent, sent_score = infer_sentiment_lexical(title)
+                        collected.append({
+                            "id": f"gdelt_{abs(hash(url))%1000000}",
+                            "source": "gdelt",
+                            "author": domain,
+                            "text": title,
+                            "url": url,
+                            "published_at": pub_date,
+                            "likes": 0,
+                            "comments": 0,
+                            "shares": 0,
+                            "topic_id": topic_slug,
+                            "topic_name": topic_name,
+                            "sentiment": sent,
+                            "sentiment_score": sent_score,
+                            "is_question": is_question_text(title),
+                        })
 
-                # Exponential backoff: sleep 1s, then 2s
-                await asyncio.sleep(1.0 * (attempt + 1))
+            if degraded_hit and not collected:
+                _gdelt_unavailable_until = time.time() + 600.0  # 10 minute circuit breaker
+                logger.warning("GDELT DOC 2.0 returned 503 degraded. Circuit breaker activated for 10 minutes.")
+
+    except Exception as e:
+        logger.warning(f"GDELT DOC 2.0 fetch error: {e}")
 
     if collected:
         save_gdelt_cache(collected)
@@ -403,56 +421,59 @@ async def collect_gdelt_posts() -> List[Dict[str, Any]]:
 # --- 3. Google News RSS Collector (Substitute Source 3) ---
 
 async def collect_google_news_posts() -> List[Dict[str, Any]]:
-    """Collects live news articles from Google News RSS."""
+    """Collects live news articles from Google News RSS in parallel."""
     collected_posts: List[Dict[str, Any]] = []
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SocialPulse/1.0"}
     queries = ["Tata STRIVE", "skill development India youth", "electric vehicle vocational training", "solar technician course"]
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for q in queries:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            async def fetch_rss(q: str):
                 encoded_q = httpx.URL(f"{q} skilling India")
                 url = f"https://news.google.com/rss/search?q={encoded_q}&hl=en-IN&gl=IN&ceid=IN:en"
                 try:
                     res = await client.get(url, headers=headers)
-                    if not res.is_success:
-                        continue
-                    xml_text = res.text
-                    items = re.findall(r"<item>([\s\S]*?)<\/item>", xml_text)
+                    if res.is_success:
+                        return res.text
+                except Exception:
+                    pass
+                return ""
 
-                    for idx, item_xml in enumerate(items[:5]):
-                        title_m = re.search(r"<title>([\s\S]*?)<\/title>", item_xml)
-                        link_m = re.search(r"<link>([\s\S]*?)<\/link>", item_xml)
-                        pubdate_m = re.search(r"<pubDate>([\s\S]*?)<\/pubDate>", item_xml)
-                        source_m = re.search(r"<source[^>]*>([\s\S]*?)<\/source>", item_xml)
-
-                        if title_m and link_m:
-                            raw_title = title_m.group(1).replace("<![CDATA[", "").replace("]]>", "").strip()
-                            source_name = source_m.group(1).strip() if source_m else "National News"
-                            link = link_m.group(1).strip()
-
-                            topic_name, topic_slug, _ = classify_text_to_topic(raw_title)
-                            sent, sent_score = infer_sentiment_lexical(raw_title)
-
-                            collected_posts.append({
-                                "id": f"gnews_{int(datetime.now().timestamp())}_{idx}_{abs(hash(link))%10000}",
-                                "source": "google_news",
-                                "author": source_name,
-                                "text": raw_title,
-                                "url": link,
-                                "published_at": datetime.now(timezone.utc).isoformat(),
-                                "likes": 0,
-                                "comments": 0,
-                                "shares": 0,
-                                "topic_id": topic_slug,
-                                "topic_name": topic_name,
-                                "sentiment": sent,
-                                "sentiment_score": sent_score,
-                                "is_question": "?" in raw_title,
-                            })
-                except Exception as e:
-                    logger.warning(f"Error fetching Google News for '{q}': {e}")
+            xml_results = await asyncio.gather(*[fetch_rss(q) for q in queries], return_exceptions=True)
+            for xml_text in xml_results:
+                if not isinstance(xml_text, str) or not xml_text:
                     continue
+                items = re.findall(r"<item>([\s\S]*?)<\/item>", xml_text)
+                for idx, item_xml in enumerate(items[:5]):
+                    title_m = re.search(r"<title>([\s\S]*?)<\/title>", item_xml)
+                    link_m = re.search(r"<link>([\s\S]*?)<\/link>", item_xml)
+                    pubdate_m = re.search(r"<pubDate>([\s\S]*?)<\/pubDate>", item_xml)
+                    source_m = re.search(r"<source[^>]*>([\s\S]*?)<\/source>", item_xml)
+
+                    if title_m and link_m:
+                        raw_title = title_m.group(1).replace("<![CDATA[", "").replace("]]>", "").strip()
+                        source_name = source_m.group(1).strip() if source_m else "National News"
+                        link = link_m.group(1).strip()
+
+                        topic_name, topic_slug, _ = classify_text_to_topic(raw_title)
+                        sent, sent_score = infer_sentiment_lexical(raw_title)
+
+                        collected_posts.append({
+                            "id": f"gnews_{abs(hash(link))%1000000}",
+                            "source": "google_news",
+                            "author": source_name,
+                            "text": raw_title,
+                            "url": link,
+                            "published_at": datetime.now(timezone.utc).isoformat(),
+                            "likes": 0,
+                            "comments": 0,
+                            "shares": 0,
+                            "topic_id": topic_slug,
+                            "topic_name": topic_name,
+                            "sentiment": sent,
+                            "sentiment_score": sent_score,
+                            "is_question": "?" in raw_title,
+                        })
 
         SOURCE_STATUS["google_news"] = {
             "status": "online" if collected_posts else "degraded",
@@ -469,53 +490,57 @@ async def collect_google_news_posts() -> List[Dict[str, Any]]:
 # --- 4. Bluesky Search Collector (Substitute Source 4) ---
 
 async def collect_bluesky_posts(limit: int = 25) -> List[Dict[str, Any]]:
-    """Collects real posts from Bluesky public AT Protocol search API."""
+    """Collects real posts from Bluesky public AT Protocol search API in parallel."""
     collected_posts: List[Dict[str, Any]] = []
     headers = {"User-Agent": "SocialPulse-Collector/1.0", "Accept": "application/json"}
     queries = ["skilling India", "Tata STRIVE", "vocational training", "electric vehicle courses"]
 
     try:
         per_query_limit = max(1, limit // len(queries)) if limit else 5
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            for q in queries:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            async def fetch_bsky_query(q: str):
                 url = f"https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={httpx.URL(q)}&limit={per_query_limit}&sort=latest"
                 try:
                     res = await client.get(url, headers=headers)
-                    if not res.is_success:
-                        continue
-                    posts_raw = res.json().get("posts", [])
-                    for p in posts_raw:
-                        record = p.get("record", {})
-                        text = record.get("text", "")
-                        if not text:
-                            continue
-                        author = f"@{p.get('author', {}).get('handle', 'bsky.user')}"
-                        uri = p.get("uri", "")
-                        rkey = uri.split("/")[-1] if uri else f"{int(datetime.now().timestamp())}"
-                        post_url = f"https://bsky.app/profile/{p.get('author', {}).get('handle')}/post/{rkey}"
+                    if res.is_success:
+                        return res.json().get("posts", [])
+                except Exception:
+                    pass
+                return []
 
-                        topic_name, topic_slug, _ = classify_text_to_topic(text)
-                        sent, sent_score = infer_sentiment_lexical(text)
-
-                        collected_posts.append({
-                            "id": f"bsky_{p.get('cid', rkey)[:16]}",
-                            "source": "bluesky",
-                            "author": author,
-                            "text": text,
-                            "url": post_url,
-                            "published_at": record.get("createdAt") or datetime.now(timezone.utc).isoformat(),
-                            "likes": int(p.get("likeCount", 0)),
-                            "comments": int(p.get("replyCount", 0)),
-                            "shares": int(p.get("repostCount", 0)),
-                            "topic_id": topic_slug,
-                            "topic_name": topic_name,
-                            "sentiment": sent,
-                            "sentiment_score": sent_score,
-                            "is_question": is_question_text(text),
-                        })
-                except Exception as e:
-                    logger.warning(f"Error fetching Bluesky posts for '{q}': {e}")
+            results = await asyncio.gather(*[fetch_bsky_query(q) for q in queries], return_exceptions=True)
+            for posts_raw in results:
+                if not isinstance(posts_raw, list):
                     continue
+                for p in posts_raw:
+                    record = p.get("record", {})
+                    text = record.get("text", "")
+                    if not text:
+                        continue
+                    author = f"@{p.get('author', {}).get('handle', 'bsky.user')}"
+                    uri = p.get("uri", "")
+                    rkey = uri.split("/")[-1] if uri else f"{int(datetime.now().timestamp())}"
+                    post_url = f"https://bsky.app/profile/{p.get('author', {}).get('handle')}/post/{rkey}"
+
+                    topic_name, topic_slug, _ = classify_text_to_topic(text)
+                    sent, sent_score = infer_sentiment_lexical(text)
+
+                    collected_posts.append({
+                        "id": f"bsky_{p.get('cid', rkey)[:16]}",
+                        "source": "bluesky",
+                        "author": author,
+                        "text": text,
+                        "url": post_url,
+                        "published_at": record.get("createdAt") or datetime.now(timezone.utc).isoformat(),
+                        "likes": int(p.get("likeCount", 0)),
+                        "comments": int(p.get("replyCount", 0)),
+                        "shares": int(p.get("repostCount", 0)),
+                        "topic_id": topic_slug,
+                        "topic_name": topic_name,
+                        "sentiment": sent,
+                        "sentiment_score": sent_score,
+                        "is_question": is_question_text(text),
+                    })
 
         SOURCE_STATUS["bluesky"] = {
             "status": "online" if collected_posts else "degraded",
@@ -567,10 +592,13 @@ def aggregate_daily_metrics_from_posts() -> int:
         pos = r["pos_count"]
         neg = r["neg_count"]
         s_score = round((pos - neg) / max(1, vol), 2)
+        raw_topic = r["topic_name"] or r["topic_id"] or "Employability and job readiness"
+        canon_topic = TOPIC_ALIASES.get(raw_topic.lower(), raw_topic)
+        canon_slug = topic_to_slug(canon_topic)
         upsert_daily_metrics({
             "date": r["post_date"],
-            "topic_id": r["topic_id"],
-            "topic_name": r["topic_name"],
+            "topic_id": canon_slug,
+            "topic_name": canon_topic,
             "mentions": vol,
             "youtube_count": r["yt_count"],
             "gdelt_count": r["gdelt_count"],
