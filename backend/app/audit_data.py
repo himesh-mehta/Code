@@ -24,6 +24,7 @@ from app.db import (
     get_saved_campaigns,
 )
 from app.trends.taxonomy import TOPIC_CATEGORIES
+from app.opportunities_service import get_real_opportunities
 
 def run_audit():
     print("=" * 80)
@@ -56,12 +57,18 @@ def run_audit():
 
     conn.close()
 
+    opp_data = get_real_opportunities()
+    opp_items = opp_data.get("items", [])
+    opp_summary = opp_data.get("summary_strip", {})
+    is_opp_sample = opp_data.get("is_sample", False)
+
     print(f"\n[GLOBAL STORAGE SNAPSHOT]")
     print(f" * Total Stored Posts (SQLite):          {total_posts} (Deduplicated by URL)")
     print(f" * Total Learner Questions Stored:      {total_questions}")
     print(f" * Live Sources Connected:              {', '.join(sources) if sources else 'None yet'}")
     print(f" * Real Daily Metric Observations:      {real_metric_slots} records")
     print(f" * Seeded Baseline Slots (Historical):  {simulated_slots} records")
+    print(f" * Real Scored Opportunities:           {len(opp_items)} active windows")
     print(f" * Saved Reports on Disk:               {len(reports)}")
     print(f" * Saved Campaign Drafts:               {len(campaigns)}")
     print()
@@ -101,6 +108,7 @@ def run_audit():
                 "Card 2 (Fastest Growing): 100% real % change vs previous 7 days (min 20 mentions filter)",
                 "Card 3 (Biggest Expected Rise): Holt-Winters ETS strictly requires >= 21 real days (shows 'Building history' if < 21)",
                 "Forecast Chart: Real recorded days only (solid line) & ETS projection (dotted line)",
+                "Emerging Trends & Skills: 6 in-demand vocational skill clusters derived from real posts and Groq",
                 "Curated Topics Table: 100% real weekly mentions, velocity, status chips & 'See proof' links",
                 "Groq Narration: Grounded words only, server validates & rejects any invented numbers",
             ],
@@ -110,11 +118,16 @@ def run_audit():
         {
             "page": "4. Opportunity Radar (/opportunities)",
             "real_values": [
-                f"Dynamic Clusters: Clustered from {active_topics_with_posts} active topics",
-                "Transparent Scoring: Volume 25, Growth 25, Relevance 25, Eng 15, Sentiment 10",
-                "Evidence Grounding: Real post counts, URLs, and learner quotes attached",
+                f"Opportunity Map: {len(opp_items)} opportunities plotted with real Demand (X), Momentum (Y), and Engagement (Z)",
+                f"Quadrant Dividers: Medians at Demand={opp_data.get('quadrant_medians', {}).get('median_demand')} & Momentum={opp_data.get('quadrant_medians', {}).get('median_momentum')}%",
+                "Why This Score Breakdown: Volume 25%, Growth 25%, Relevance 25%, Eng 15%, Unmet Need 10%",
+                f"Top Ranked Opportunity: {opp_summary.get('top_opportunity')} ({opp_summary.get('top_score')} pts)",
+                f"Summary Strip: {opp_summary.get('high_count')} high priority windows detected",
+                "Momentum Over Time: Top 5 opportunities tracked with 30-day timeline series (gated at >= 7 real days)",
+                "Transparent Evidence: Real post quotes, authors, URLs, and course alignments",
+                "Hallucination Prevention: Groq one-line reasons validated server-side against unmentioned numbers",
             ],
-            "sample_fallback": "Fallback opportunities shown with 'Sample data' badge" if total_posts < 20 else "None (Real Clusters)",
+            "sample_fallback": "Active ('Sample data' badge)" if is_opp_sample else "None (100% Real Scored Clusters)",
             "hardcoded_numbers": 0,
         },
         {

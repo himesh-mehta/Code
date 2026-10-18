@@ -34,6 +34,10 @@ const CRITERIA_META: Record<
     label: "Unmet Need (Sentiment Gap)",
     description: "High friction, confusion, or unanswered audience questions (10%)",
   },
+  unmet_need: {
+    label: "Unmet Need (Learner Doubts)",
+    description: "Share of question posts and negative posts with no answer (10%)",
+  },
 };
 
 export function ScoreBreakdown({ score, breakdown, weights, priority }: Props) {
@@ -79,7 +83,7 @@ export function ScoreBreakdown({ score, breakdown, weights, priority }: Props) {
 
       <div className="space-y-3.5">
         {(Object.keys(breakdown) as (keyof IScoreBreakdown)[]).map((key) => {
-          const value = breakdown[key];
+          const value = breakdown[key] ?? 0;
           const weight = weights[key] ?? 0.2;
           const meta = CRITERIA_META[key] || {
             label: key,

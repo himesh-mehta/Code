@@ -13,9 +13,11 @@ async def get_trends_overview():
     from ..db import get_total_posts_count
     from .collector import get_source_availability_summary
     from .narration import generate_trend_narration
+    from .skills_service import get_emerging_skills_intelligence
 
     summary = trend_storage.get_all_topics_current_summary()
     top_cards = trend_storage.get_top_insight_cards(summary)
+    emerging_skills = await get_emerging_skills_intelligence()
 
     # Prepare payload for grounded Groq narration
     narration_payload = {
@@ -48,6 +50,7 @@ async def get_trends_overview():
         "is_sample_fallback": (total_posts < 30),
         "total_real_posts": total_posts,
         "taxonomy": TOPIC_CATEGORIES,
+        "emerging_skills": emerging_skills,
     }
 
 @router.get("/history")

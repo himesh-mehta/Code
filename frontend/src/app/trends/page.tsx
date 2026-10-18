@@ -11,6 +11,7 @@ import {
   TrendsHealthResponse,
   TrendsOverviewResponse,
   ProofItem,
+  EmergingSkill,
   formatCount,
   formatChange,
   topicToSlug,
@@ -1133,6 +1134,123 @@ function TrendsContent() {
             ))}
           </div>
         </section>
+
+        {/* SECTION: EMERGING TRENDS & IN-DEMAND SKILLS (Computed from live APIs & Groq) */}
+        {overviewData?.emerging_skills && overviewData.emerging_skills.length > 0 && (
+          <section className="flex flex-col gap-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#d2ecff] text-[#00629e] text-xs font-bold uppercase tracking-wider">
+                    <Sparkles className="w-3.5 h-3.5 text-[#0099f2]" />
+                    Skill Intelligence
+                  </span>
+                  <span className="text-xs text-[#3f4852] font-semibold">
+                    Derived from authentic post clusters &amp; Groq synthesis
+                  </span>
+                </div>
+                <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">
+                  Emerging Trends &amp; In-Demand Skills
+                </h2>
+              </div>
+              <span className="text-xs text-[#00629e] font-semibold bg-[#eaf5ff] px-3 py-1.5 rounded-full border border-[#cae6fb] self-start sm:self-auto">
+                Aligned to Tata STRIVE National Program Catalog
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {overviewData.emerging_skills.map((skill: EmergingSkill) => {
+                const isSurging = skill.demand_status === "Surging";
+                return (
+                  <article
+                    key={skill.id}
+                    className="stitch-card p-5 flex flex-col justify-between group hover:border-[#0099f2] transition-all"
+                  >
+                    <div>
+                      {/* Category & Demand Status Badge */}
+                      <div className="flex items-center justify-between gap-2 mb-3">
+                        <span className="text-xs font-bold text-[#3f4852] uppercase tracking-wider bg-[#f5faff] px-2.5 py-1 rounded-full border border-[#def0ff]">
+                          {skill.category}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              isSurging
+                                ? "bg-[#fdecec] text-[#d64545]"
+                                : "bg-[#eaf5ff] text-[#00629e]"
+                            }`}
+                          >
+                            {skill.demand_status}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-[#e6f6ef] text-[#1e9e6a] text-[10px] font-bold">
+                            {skill.growth}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Skill Name */}
+                      <h3 className="text-base font-extrabold text-[#001e2d] leading-snug group-hover:text-[#0099f2] transition-colors mb-2">
+                        {skill.skill}
+                      </h3>
+
+                      {/* Practical Application */}
+                      <p className="text-xs text-[#3f4852] leading-relaxed font-medium mb-3">
+                        {skill.practical_application}
+                      </p>
+
+                      {/* Associated Tata STRIVE Course */}
+                      <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#eaf5ff] text-xs text-[#00629e] font-bold mb-3 border border-[#cae6fb]">
+                        <GraduationCap className="w-4 h-4 text-[#0099f2] shrink-0" />
+                        <span className="truncate">{skill.matching_programme}</span>
+                      </div>
+
+                      {/* Real Evidence Quote */}
+                      {skill.evidence_quote && (
+                        <div className="p-2.5 rounded-xl bg-white border border-[#def0ff] space-y-1 mb-3">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                            Real Learner / Recruiter Signal:
+                          </span>
+                          <p className="text-xs text-[#001e2d] italic line-clamp-2">
+                            &quot;{skill.evidence_quote}&quot;
+                          </p>
+                          <div className="flex items-center justify-between text-[10px] text-[#3f4852] pt-1 border-t border-slate-100">
+                            <span className="font-semibold">{skill.evidence_author}</span>
+                            {skill.evidence_url && (
+                              <a
+                                href={skill.evidence_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[#0099f2] hover:underline font-bold inline-flex items-center gap-0.5"
+                              >
+                                <span>Inspect</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bottom CTA to Campaign Studio */}
+                    <div className="pt-3 border-t border-[#def0ff] flex items-center justify-between">
+                      <span className="text-[11px] text-[#3f4852] font-semibold">
+                        {formatCount(skill.post_count)} discussions
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/studio?topic=${encodeURIComponent(skill.topic)}`)}
+                        className="text-xs font-bold text-[#0099f2] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>Campaign Studio</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Curated Taxonomy Skilling Topics Table with "See proof" expander */}
         <section className="stitch-card p-6 lg:p-8 space-y-6">

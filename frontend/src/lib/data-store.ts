@@ -22,6 +22,7 @@ export const SCORE_WEIGHTS: Record<keyof ScoreBreakdown, number> = {
   relevance: 0.25,
   engagement: 0.15,
   sentiment_gap: 0.1,
+  unmet_need: 0.1,
 };
 
 import { INITIAL_POSTS } from "./initial-posts";

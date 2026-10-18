@@ -38,6 +38,23 @@ export interface CardNarration {
   matching_programme?: string;
 }
 
+export interface EmergingSkill {
+  id: string;
+  skill: string;
+  topic: string;
+  category: string;
+  demand_status: "Surging" | "High Demand" | "Rising Fast" | "Critical Need";
+  growth: string;
+  post_count: number;
+  matching_programme: string;
+  practical_application: string;
+  evidence_quote: string;
+  evidence_author: string;
+  evidence_url?: string;
+  source: string;
+  is_real?: boolean;
+}
+
 export interface TrendsOverviewResponse {
   status: string;
   total_topics: number;
@@ -64,6 +81,7 @@ export interface TrendsOverviewResponse {
   is_sample_fallback?: boolean;
   total_real_posts?: number;
   taxonomy: string[];
+  emerging_skills?: EmergingSkill[];
 }
 
 export function formatCount(count: number | null | undefined): string {

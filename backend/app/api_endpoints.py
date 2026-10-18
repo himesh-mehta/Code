@@ -27,6 +27,7 @@ from .trends.collector import (
 from .impact_service import get_official_impact
 from .studio_service import get_studio_evidence_pack, get_studio_suggestions
 from .audience_service import compute_audience_intelligence
+from .opportunities_service import get_real_opportunities
 from .db import (
     get_db_connection,
     get_posts,
@@ -597,114 +598,28 @@ async def refresh_overview_endpoint(payload: Optional[Dict[str, Any]] = Body(Non
 # --- 4. /api/opportunities ---
 
 @router.get("/opportunities")
-def get_opportunities_endpoint():
+def get_opportunities_endpoint(
+    date_range: str = Query("30d", description="Time range: 7d, 30d, 90d, all"),
+    source: Optional[str] = Query(None, description="Optional source filter: youtube, bluesky, google_news, gdelt"),
+    topic: Optional[str] = Query(None, description="Optional topic filter"),
+    sentiment: Optional[str] = Query(None, description="Optional sentiment filter: positive, neutral, negative"),
+    priority: Optional[str] = Query(None, description="Optional priority filter: high, medium, low"),
+):
     """
     Computes transparently scored opportunities clustered from stored SQLite posts:
-    - Volume 25%, Growth 25%, Relevance 25%, Engagement 15%, Sentiment Gap 10%
-    - Real evidence: post count, top post links, actual quotes
-    - Shows sample data badge if fewer than 20 posts total
+    - Volume 25%, Growth 25%, Relevance 25%, Engagement 15%, Unmet Need 10%
+    - 4 Quadrants for Opportunity Map bubble chart (Act now, Build awareness, Protect and maintain, Watch)
+    - 30-day daily momentum time-series for top 5 opportunities with 7-day history check
+    - Summary strip with high priority count and plain-English headline
+    - Grounded AI reasoning validated server-side against hallucinated numbers
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    total_posts = get_total_posts_count()
-    is_sample_needed = total_posts < MIN_POSTS_THRESHOLD
-
-    cursor.execute("""
-        SELECT 
-            topic_id,
-            topic_name,
-            COUNT(*) as post_count,
-            SUM(CASE WHEN is_question = 1 THEN 1 ELSE 0 END) as q_cnt,
-            SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as neg_cnt,
-            AVG(likes + comments) as avg_eng
-        FROM posts
-        GROUP BY topic_id
-        HAVING post_count > 0
-        ORDER BY post_count DESC
-    """)
-    topic_clusters = cursor.fetchall()
-
-    opportunities = []
-
-    for idx, tc in enumerate(topic_clusters):
-        t_id = tc["topic_id"]
-        t_name = tc["topic_name"]
-        cnt = tc["post_count"]
-        q_cnt = tc["q_cnt"]
-        neg_cnt = tc["neg_cnt"]
-        avg_eng = float(tc["avg_eng"] or 0)
-
-        # Real evidence posts
-        cursor.execute("""
-            SELECT id, author, text, url, likes, sentiment, is_question
-            FROM posts
-            WHERE topic_id = ?
-            ORDER BY (likes + is_question * 5) DESC
-            LIMIT 3
-        """, (t_id,))
-        evidence_posts = [dict(r) for r in cursor.fetchall()]
-
-        # Transparent scoring calculation
-        vol_score = min(100, cnt * 12)
-        growth_score = 88 if "ev" in t_id or "ai" in t_id or "solar" in t_id else 65
-        relevance_score = 92
-        eng_score = min(100, int(avg_eng * 1.5))
-        sent_gap_score = min(100, int(((q_cnt + neg_cnt) / max(1, cnt)) * 100))
-
-        total_score = round(
-            vol_score * 0.25 +
-            growth_score * 0.25 +
-            relevance_score * 0.25 +
-            eng_score * 0.15 +
-            sent_gap_score * 0.10
-        )
-
-        priority = "high" if total_score >= 75 else ("medium" if total_score >= 50 else "low")
-
-        opportunities.append({
-            "id": f"opp_{t_id}",
-            "title": f"{t_name} Guidance & Admissions Outreach",
-            "topic": t_name,
-            "topic_id": t_id,
-            "summary": f"Identified {cnt} authentic student discussions with {q_cnt} direct questions and {neg_cnt} reports of confusion or doubts.",
-            "why_it_matters": f"Tata STRIVE provides structured vocational training in {t_name}. Direct social clarity captures high-intent youth seeking admission.",
-            "score": total_score,
-            "score_breakdown": {
-                "volume": vol_score,
-                "growth": growth_score,
-                "relevance": relevance_score,
-                "engagement": eng_score,
-                "sentiment_gap": sent_gap_score,
-            },
-            "score_weights": {
-                "volume": 0.25,
-                "growth": 0.25,
-                "relevance": 0.25,
-                "engagement": 0.15,
-                "sentiment_gap": 0.10,
-            },
-            "priority": priority,
-            "post_count": cnt,
-            "evidence_posts": evidence_posts,
-            "sample_questions": [p["text"][:100] for p in evidence_posts if p["is_question"]],
-            "recommended_action": f"Launch an explanatory campaign with lab walkthroughs, alumni placements, and registration CTAs.",
-            "target_audience": "Vocational trainees, ITI/polytechnic students, and first-generation learners",
-            "suggested_cta": f"Register for the upcoming {t_name} masterclass and admissions drive.",
-            "is_sample": is_sample_needed,
-        })
-
-    conn.close()
-
-    opportunities.sort(key=lambda x: x["score"], reverse=True)
-
-    return {
-        "status": "success",
-        "total_opportunities": len(opportunities),
-        "is_sample": is_sample_needed,
-        "items": opportunities,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    return get_real_opportunities(
+        date_range=date_range,
+        source=source,
+        topic=topic,
+        sentiment=sentiment,
+        priority_filter=priority,
+    )
 
 # --- 5. /api/audience ---
 

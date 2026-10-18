@@ -99,18 +99,41 @@ export interface ScoreBreakdown {
   growth: number;
   relevance: number;
   engagement: number;
-  sentiment_gap: number;
+  unmet_need?: number;
+  sentiment_gap?: number;
 }
+
+export interface WeightedBreakdown {
+  volume: number;
+  growth: number;
+  relevance: number;
+  engagement: number;
+  unmet_need: number;
+}
+
+export interface RawBreakdownValues {
+  volume: string;
+  growth: string;
+  relevance: string;
+  engagement: string;
+  unmet_need: string;
+}
+
+export type OpportunityQuadrant = "Act now" | "Build awareness" | "Protect and maintain" | "Watch";
 
 export interface Opportunity {
   id: string;
   title: string;
   topic: string;
-  summary: string;
+  topic_id?: string;
+  summary?: string;
   why_it_matters: string;
   score: number;
   score_breakdown: ScoreBreakdown;
-  score_weights: Record<keyof ScoreBreakdown, number>;
+  score_weights: Record<string, number>;
+  weighted_breakdown?: WeightedBreakdown;
+  raw_breakdown_values?: RawBreakdownValues;
+  score_driver_caption?: string;
   priority: Priority;
   supporting_post_ids: string[];
   recommended_action: string;
@@ -119,8 +142,62 @@ export interface Opportunity {
   suggested_cta?: string;
   is_sample?: boolean;
   post_count?: number;
+  demand?: number;
+  momentum?: number;
+  growth_pct?: number | null;
+  growth_label?: string;
+  engagement?: number;
+  likes?: number;
+  comments?: number;
+  matching_course?: string;
+  questions_count?: number;
+  negative_count?: number;
+  quadrant?: OpportunityQuadrant;
+  quadrant_label?: string;
+  has_history_7d?: boolean;
   evidence_posts?: any[];
   sample_questions?: string[];
+}
+
+export interface OpportunitySummaryStrip {
+  total: number;
+  high_count: number;
+  top_opportunity: string;
+  top_score: number;
+  headline: string;
+}
+
+export interface QuadrantMedians {
+  median_demand: number;
+  median_momentum: number;
+}
+
+export interface OpportunityTimeseriesPoint {
+  date: string;
+  [key: string]: any;
+}
+
+export interface Top5OpportunityMetadata {
+  id: string;
+  topic_id: string;
+  topic: string;
+  has_history_7d: boolean;
+  score: number;
+}
+
+export interface OpportunityResponse {
+  status: string;
+  total_opportunities: number;
+  filtered_count?: number;
+  is_sample: boolean;
+  items: Opportunity[];
+  opportunities: Opportunity[];
+  all_opportunities?: Opportunity[];
+  summary_strip: OpportunitySummaryStrip;
+  quadrant_medians: QuadrantMedians;
+  timeseries_30d: OpportunityTimeseriesPoint[];
+  top_5_metadata: Top5OpportunityMetadata[];
+  updated_at: string;
 }
 
 export type CampaignTone = "friendly" | "professional" | "inspiring";

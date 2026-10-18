@@ -16,6 +16,7 @@ import {
   StudioEvidencePack,
   StudioSuggestionsResponse,
   RealAudienceResponse,
+  OpportunityResponse,
 } from "../types";
 import { store } from "./data-store";
 import { fetchYouTubePosts } from "./youtube";
@@ -591,46 +592,152 @@ export const api = {
     };
   },
 
-  getOpportunities: async (query?: PostsQuery): Promise<{ items: Opportunity[] }> => {
+  getOpportunities: async (query?: PostsQuery & { priority?: string; priority_filter?: string }): Promise<OpportunityResponse & { items: Opportunity[] }> => {
     try {
-      const res = await fetch("/api/opportunities", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (query?.date_range) params.append("date_range", query.date_range);
+      if (query?.platform && (query.platform as string) !== "all") params.append("source", query.platform);
+      if ((query as any)?.source && (query as any).source !== "all") params.append("source", (query as any).source);
+      if (query?.topic && query.topic !== "all") params.append("topic", query.topic);
+      if (query?.sentiment && (query.sentiment as string) !== "all") params.append("sentiment", query.sentiment);
+      const pr = query?.priority || (query as any)?.priority_filter;
+      if (pr && pr !== "all") params.append("priority", pr);
+
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/api/opportunities${qs}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        if (data.opportunities && data.opportunities.length > 0) {
-          const items: Opportunity[] = data.opportunities.map((o: any) => ({
-            id: o.id,
-            title: o.title,
-            topic: o.topic,
-            summary: o.summary,
-            why_it_matters: o.why_it_matters,
-            score: o.score,
-            score_breakdown: o.score_breakdown || { volume: 20, growth: 20, relevance: 20, engagement: 15, sentiment_gap: 10 },
-            score_weights: o.score_weights || { volume: 0.25, growth: 0.25, relevance: 0.25, engagement: 0.15, sentiment_gap: 0.1 },
-            priority: o.priority,
-            supporting_post_ids: (o.evidence_posts || []).map((p: any) => p.id || p.url),
-            recommended_action: o.recommended_action,
-            platforms: ["youtube", "google_news"] as any,
-            target_audience: o.target_audience,
-            suggested_cta: o.suggested_cta,
-            is_sample: Boolean(o.is_sample),
-            post_count: o.post_count,
-            evidence_posts: o.evidence_posts || [],
-            sample_questions: o.sample_questions || [],
-          }));
-          return { items };
-        }
+        const rawList = data.items || data.opportunities || [];
+        const items: Opportunity[] = rawList.map((o: any) => ({
+          id: o.id,
+          title: o.title,
+          topic: o.topic,
+          topic_id: o.topic_id,
+          summary: o.summary || o.why_it_matters,
+          why_it_matters: o.why_it_matters,
+          score: o.score,
+          score_breakdown: o.score_breakdown || { volume: 20, growth: 20, relevance: 20, engagement: 15, unmet_need: 10 },
+          score_weights: o.score_weights || { volume: 0.25, growth: 0.25, relevance: 0.25, engagement: 0.15, unmet_need: 0.1 },
+          weighted_breakdown: o.weighted_breakdown || {
+            volume: Number(((o.score_breakdown?.volume || 0) * 0.25).toFixed(1)),
+            growth: Number(((o.score_breakdown?.growth || 0) * 0.25).toFixed(1)),
+            relevance: Number(((o.score_breakdown?.relevance || 0) * 0.25).toFixed(1)),
+            engagement: Number(((o.score_breakdown?.engagement || 0) * 0.15).toFixed(1)),
+            unmet_need: Number(((o.score_breakdown?.unmet_need || 0) * 0.10).toFixed(1)),
+          },
+          raw_breakdown_values: o.raw_breakdown_values || {
+            volume: `${o.demand || o.post_count || 0} mentions`,
+            growth: o.growth_label || (o.growth_pct != null ? `${o.growth_pct}%` : "New"),
+            relevance: `Course: ${o.matching_course || "Tata STRIVE Certified"}`,
+            engagement: `${o.engagement || 0} interactions`,
+            unmet_need: `${o.questions_count || 0} questions`,
+          },
+          score_driver_caption: o.score_driver_caption || "Score is computed from real social volume and growth.",
+          priority: o.priority,
+          supporting_post_ids: o.supporting_post_ids || (o.evidence_posts || []).map((p: any) => p.id || p.url),
+          recommended_action: o.recommended_action,
+          platforms: (o.platforms && o.platforms.length > 0) ? o.platforms : ["youtube", "google_news"],
+          target_audience: o.target_audience,
+          suggested_cta: o.suggested_cta,
+          is_sample: Boolean(o.is_sample || data.is_sample),
+          post_count: o.post_count || o.demand,
+          demand: o.demand ?? o.post_count ?? 0,
+          momentum: o.momentum ?? 0,
+          growth_pct: o.growth_pct,
+          growth_label: o.growth_label || (o.growth_pct != null ? `${o.growth_pct > 0 ? "+" : ""}${o.growth_pct}%` : "New"),
+          engagement: o.engagement ?? 0,
+          likes: o.likes ?? 0,
+          comments: o.comments ?? 0,
+          matching_course: o.matching_course,
+          questions_count: o.questions_count ?? 0,
+          negative_count: o.negative_count ?? 0,
+          quadrant: o.quadrant || "Act now",
+          quadrant_label: o.quadrant_label || "Active Window",
+          has_history_7d: o.has_history_7d ?? false,
+          evidence_posts: o.evidence_posts || [],
+          sample_questions: o.sample_questions || [],
+        }));
+
+        return {
+          status: data.status || "success",
+          total_opportunities: data.total_opportunities ?? items.length,
+          filtered_count: data.filtered_count ?? items.length,
+          is_sample: Boolean(data.is_sample),
+          items,
+          opportunities: items,
+          all_opportunities: (data.all_opportunities || items).map((o: any) => ({
+            ...o,
+            demand: o.demand ?? o.post_count ?? 0,
+            momentum: o.momentum ?? 0,
+            growth_label: o.growth_label || (o.growth_pct != null ? `${o.growth_pct > 0 ? "+" : ""}${o.growth_pct}%` : "New"),
+          })),
+          summary_strip: data.summary_strip || {
+            total: items.length,
+            high_count: items.filter((x: any) => x.priority === "high").length,
+            top_opportunity: items[0]?.topic || "None",
+            top_score: items[0]?.score || 0,
+            headline: items.length > 0 ? `${items.filter((x: any) => x.priority === "high").length} opportunities need immediate action, led by ${items[0]?.topic}.` : "No discussions found.",
+          },
+          quadrant_medians: data.quadrant_medians || { median_demand: 10, median_momentum: 20 },
+          timeseries_30d: data.timeseries_30d || [],
+          top_5_metadata: data.top_5_metadata || [],
+          updated_at: data.updated_at || new Date().toISOString(),
+        };
       }
     } catch (e) {
-      console.warn("Using sample opportunities fallback:", e);
+      console.warn("Error fetching /api/opportunities:", e);
     }
+
+    const fallbackItems: Opportunity[] = SAMPLE_OPPORTUNITIES.map((o: any) => ({
+      ...o,
+      demand: o.post_count || 32,
+      momentum: 45,
+      growth_pct: 45,
+      growth_label: "+45%",
+      engagement: 80,
+      quadrant: "Act now",
+      quadrant_label: "High Demand, High Growth",
+      has_history_7d: true,
+      score_weights: { volume: 0.25, growth: 0.25, relevance: 0.25, engagement: 0.15, unmet_need: 0.1 },
+      weighted_breakdown: {
+        volume: Number(((o.score_breakdown?.volume || 80) * 0.25).toFixed(1)),
+        growth: Number(((o.score_breakdown?.growth || 80) * 0.25).toFixed(1)),
+        relevance: Number(((o.score_breakdown?.relevance || 90) * 0.25).toFixed(1)),
+        engagement: Number(((o.score_breakdown?.engagement || 75) * 0.15).toFixed(1)),
+        unmet_need: Number(((o.score_breakdown?.unmet_need || 60) * 0.10).toFixed(1)),
+      },
+      raw_breakdown_values: {
+        volume: `${o.post_count || 32} mentions`,
+        growth: "+45%",
+        relevance: "Course: Tata STRIVE Certification",
+        engagement: "80 interactions",
+        unmet_need: "5 doubts",
+      },
+      score_driver_caption: "Score is driven mostly by demand volume and growth.",
+      supporting_post_ids: ["sample-1", "sample-2"],
+      platforms: ["youtube", "google_news"] as any,
+      is_sample: true,
+    }));
+
     return {
-      items: SAMPLE_OPPORTUNITIES.map((o: any) => ({
-        ...o,
-        score_weights: { volume: 0.25, growth: 0.25, relevance: 0.25, engagement: 0.15, sentiment_gap: 0.1 },
-        supporting_post_ids: ["sample-1", "sample-2"],
-        platforms: ["youtube", "google_news"] as any,
-        is_sample: true,
-      })),
+      status: "fallback",
+      total_opportunities: fallbackItems.length,
+      filtered_count: fallbackItems.length,
+      is_sample: true,
+      items: fallbackItems,
+      opportunities: fallbackItems,
+      all_opportunities: fallbackItems,
+      summary_strip: {
+        total: fallbackItems.length,
+        high_count: fallbackItems.filter(x => x.priority === "high").length,
+        top_opportunity: fallbackItems[0]?.topic || "None",
+        top_score: fallbackItems[0]?.score || 0,
+        headline: "Sample baseline: 2 opportunities need action now.",
+      },
+      quadrant_medians: { median_demand: 20, median_momentum: 30 },
+      timeseries_30d: [],
+      top_5_metadata: [],
+      updated_at: new Date().toISOString(),
     };
   },
 
