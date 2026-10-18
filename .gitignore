@@ -42,6 +42,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+!backend/data/social_pulse.db
 backend/data/reports/*.csv
 backend/data/*_cache.json
 
