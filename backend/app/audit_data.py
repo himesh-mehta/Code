@@ -96,12 +96,15 @@ def run_audit():
         {
             "page": "3. Trends (/trends)",
             "real_values": [
-                f"Canonical Topics: {len(TOPIC_CATEGORIES)} topics tracked",
-                f"Holt-Winters Model: Requires 21 real days (shows 'Building history' if < 21)",
-                "Expected to Grow Next: Top 3-5 topics ranked by real forecast trajectory",
-                "Early Signals: Real taxonomy topics with dedicated keywords",
+                f"Tracked Skilling Topics: {len(TOPIC_CATEGORIES)} canonical topics",
+                "Card 1 (Most Discussed): 100% real 7-day mentions & growth from stored posts",
+                "Card 2 (Fastest Growing): 100% real % change vs previous 7 days (min 20 mentions filter)",
+                "Card 3 (Biggest Expected Rise): Holt-Winters ETS strictly requires >= 21 real days (shows 'Building history' if < 21)",
+                "Forecast Chart: Real recorded days only (solid line) & ETS projection (dotted line)",
+                "Curated Topics Table: 100% real weekly mentions, velocity, status chips & 'See proof' links",
+                "Groq Narration: Grounded words only, server validates & rejects any invented numbers",
             ],
-            "sample_fallback": f"{simulated_slots} historical baseline slots (labelled with 'Sample data' badge until overwritten)",
+            "sample_fallback": f"Sample badge shown on fallback ONLY if total posts < 30 (currently {total_posts} real posts stored)",
             "hardcoded_numbers": 0,
         },
         {

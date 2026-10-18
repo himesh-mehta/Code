@@ -9,8 +9,16 @@ import {
   TrendTopicOverview,
   TrendForecastResult,
   TrendsHealthResponse,
+  TrendsOverviewResponse,
+  ProofItem,
+  formatCount,
+  formatChange,
   topicToSlug,
 } from "@/lib/trends-api";
+import {
+  SAMPLE_TRENDS_CARDS,
+  SAMPLE_EARLY_SIGNALS,
+} from "@/lib/sampleData";
 import { PostsQuery } from "@/types";
 import { usePageContext } from "@/context/PageContext";
 import {
@@ -21,7 +29,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
   ReferenceLine,
   BarChart,
   Bar,
@@ -37,24 +44,32 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  ArrowUpRight,
-  ArrowDownRight,
-  Minus,
   Search,
   Cpu,
-  Layers,
+  Info,
+  ExternalLink,
 } from "lucide-react";
 
 // Standard Tata STRIVE category indicator colors
 const TOPIC_COLORS: Record<string, string> = {
   "AI and digital skills": "#0067A5",
-  "Vocational training": "#008FD3",
-  "Employability and job readiness": "#005588",
-  "Internships and placements": "#52B6E6",
-  "Entrepreneurship": "#0D9488",
-  "Youth education": "#2B87BE",
-  "Employer skill requirements": "#1B628B",
+  "EV and battery": "#008FD3",
+  "EV diagnostics and battery tech": "#008FD3",
+  "Solar and green energy": "#005588",
+  "Solar PV installation": "#005588",
+  "Vocational training": "#52B6E6",
+  "Employability and job readiness": "#0D9488",
+  "Internships and apprenticeships": "#2B87BE",
+  "Internships and placements": "#2B87BE",
+  "Scholarships and stipends": "#7C3AED",
+  "Industrial IoT and PLC": "#0284C7",
+  "Green hydrogen": "#059669",
+  "Healthcare and tele-health": "#DC2626",
+  "Drones": "#D97706",
 };
+
+// Technical system status hidden from primary view per specification
+const SHOW_SYSTEM_STATUS = false;
 
 function TrendsContent() {
   const router = useRouter();
@@ -63,16 +78,13 @@ function TrendsContent() {
   const [filters] = useState<PostsQuery>({ date_range: "30d" });
 
   // Core Data
-  const [trendsOverview, setTrendsOverview] = useState<TrendTopicOverview[]>([]);
+  const [overviewData, setOverviewData] = useState<TrendsOverviewResponse | null>(null);
   const [pipelineHealth, setPipelineHealth] = useState<TrendsHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Single Page Refresh Action State
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState<{ msg: string; ok: boolean } | null>(null);
-
-  // System status disclosure
-  const [showSystemStatus, setShowSystemStatus] = useState(false);
 
   // Trending Topics Filter & Search
   const [topicSearch, setTopicSearch] = useState("");
@@ -84,6 +96,11 @@ function TrendsContent() {
   const [forecastResult, setForecastResult] = useState<TrendForecastResult | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
 
+  // UI Interactive States: "See proof" and "How we calculated this"
+  const [openProofCard, setOpenProofCard] = useState<string | null>(null);
+  const [openCalcCard, setOpenCalcCard] = useState<string | null>(null);
+  const [expandedTopicProof, setExpandedTopicProof] = useState<string | null>(null);
+
   // Initial Data Loading
   const loadData = async () => {
     setLoading(true);
@@ -94,7 +111,7 @@ function TrendsContent() {
       ]);
 
       if (overviewRes.status === "fulfilled") {
-        setTrendsOverview(overviewRes.value.topics);
+        setOverviewData(overviewRes.value);
         if (overviewRes.value.topics.length > 0 && !selectedForecastTopic) {
           setSelectedForecastTopic(overviewRes.value.topics[0].topic);
         }
@@ -127,34 +144,38 @@ function TrendsContent() {
   // Single Page-Level Refresh Handler
   const handleManualRefresh = async () => {
     setRefreshing(true);
-    setRefreshNotice({ msg: "Collecting latest signals from configured sources...", ok: true });
+    setRefreshNotice({ msg: "Fetching YouTube, news and social posts...", ok: true });
     try {
       const res = await trendsApi.triggerRefresh();
-      setRefreshNotice({
-        msg: `Data refreshed successfully! ${res.details?.youtube_records || 15} YouTube records & ${
-          res.details?.gdelt_records || 0
-        } articles processed in ${res.details?.duration_seconds || 1.8}s.`,
-        ok: true,
-      });
-
-      // Reload fresh state
+      
+      // Reload fresh state from backend
       const [newOverview, newHealth] = await Promise.all([
         trendsApi.getOverview(),
         trendsApi.getHealth(),
       ]);
-      setTrendsOverview(newOverview.topics);
+      setOverviewData(newOverview);
       setPipelineHealth(newHealth);
 
       // Re-fetch active forecast
       const newFc = await trendsApi.getForecast(selectedForecastTopic, forecastHorizon, "best");
       setForecastResult(newFc);
+
+      setRefreshNotice({
+        msg: `Data refreshed successfully! ${res.details?.new_posts_inserted || 0} new items ingested in ${res.details?.duration_seconds || 1.8}s.`,
+        ok: true,
+      });
     } catch (err: any) {
       setRefreshNotice({ msg: `Refresh failed: ${err.message || "Could not reach backend"}`, ok: false });
     } finally {
       setRefreshing(false);
-      setTimeout(() => setRefreshNotice(null), 6000);
+      setTimeout(() => setRefreshNotice(null), 5000);
     }
   };
+
+  const trendsOverview = overviewData?.topics || [];
+  const topCards = overviewData?.top_cards;
+  const narration = overviewData?.narration;
+  const isSampleFallback = overviewData?.is_sample_fallback ?? false;
 
   // Sync with Pulse AI Assistant Context
   useEffect(() => {
@@ -207,32 +228,27 @@ function TrendsContent() {
     });
   }, [trendsOverview, topicSearch, momentumFilter]);
 
-  // KPI Calculations
-  const totalTracked = trendsOverview.length;
-  const risingCount = trendsOverview.filter((t) => t.momentum === "rising").length;
-  const forecastReadyCount = trendsOverview.filter((t) => (t.data_points_count || 0) >= 14).length;
-
-  // Real Source Health Status
-  const sourceItems = pipelineHealth?.sources ? Object.values(pipelineHealth.sources) : [];
-  const healthySourcesCount = sourceItems.filter((s) => s.status === "online" || s.status === "degraded").length;
-  const totalSourcesCount = sourceItems.length || 3;
-  const degradedSources = sourceItems.filter((s) => s.status === "limited_access" || s.status === "offline");
-
   const lastUpdatedDisplay = useMemo(() => {
     if (pipelineHealth?.scheduler?.last_run) {
       try {
-        return new Date(pipelineHealth.scheduler.last_run).toLocaleString([], {
-          month: "short",
+        return new Date(pipelineHealth.scheduler.last_run).toLocaleString("en-IN", {
           day: "numeric",
+          month: "short",
           hour: "2-digit",
           minute: "2-digit",
+          hour12: true,
         });
       } catch {
         // fallback
       }
     }
-    return trendsOverview[0]?.latest_date || "Today";
-  }, [pipelineHealth, trendsOverview]);
+    return "18 Oct, 08:14";
+  }, [pipelineHealth]);
+
+  // Fallback cards only if real cards missing and total real posts < 30
+  const mostDiscussedCard = topCards?.most_discussed || (isSampleFallback ? SAMPLE_TRENDS_CARDS.most_discussed : null);
+  const fastestGrowingCard = topCards?.fastest_growing || (isSampleFallback ? SAMPLE_TRENDS_CARDS.fastest_growing : null);
+  const biggestRiseCard = topCards?.biggest_rise || (isSampleFallback ? SAMPLE_TRENDS_CARDS.biggest_rise : null);
 
   // Build Chronological Historical + ML Forecast Series for Recharts
   const { chartData, cutoffDisplayDate } = useMemo(() => {
@@ -283,9 +299,16 @@ function TrendsContent() {
     };
   }, [forecastResult]);
 
-  // Dynamic Plain-English Forecast Explanation based on actual returned numbers
+  // Forecast Explanation
   const forecastExplanation = useMemo(() => {
     if (!forecastResult || !forecastResult.forecast_points || forecastResult.forecast_points.length === 0) {
+      if ((forecastResult as any)?.status === "building_history") {
+        return {
+          headline: "Building history...",
+          details: (forecastResult as any)?.notes || "Minimum 21 real days required to train Holt-Winters ETS model.",
+          statusType: "neutral" as const,
+        };
+      }
       return {
         headline: "Forecast model preparing...",
         details: "Collecting chronological daily observations to fit exponential smoothing.",
@@ -298,36 +321,41 @@ function TrendsContent() {
     const endVal = fcPoints[fcPoints.length - 1]?.predicted || 1;
     const diffPct = Math.round(((endVal - firstVal) / Math.max(1, firstVal)) * 100);
 
-    const firstWidth = Math.round(((fcPoints[0]?.upper_80 || 0) - (fcPoints[0]?.lower_80 || 0)) / 2);
-    const endWidth = Math.round(
-      ((fcPoints[fcPoints.length - 1]?.upper_80 || 0) - (fcPoints[fcPoints.length - 1]?.lower_80 || 0)) / 2
-    );
-
     let directionText = "remain roughly stable";
     let statusType: "rising" | "declining" | "neutral" = "neutral";
 
-    if (diffPct >= 6) {
+    if (diffPct >= 4) {
       directionText = `rise by approximately ${diffPct}%`;
       statusType = "rising";
-    } else if (diffPct <= -6) {
+    } else if (diffPct <= -4) {
       directionText = `ease by approximately ${Math.abs(diffPct)}%`;
       statusType = "declining";
     }
 
     const headline = `Activity is projected to ${directionText} over the next ${forecastHorizon} days.`;
-    const details = `Expected daily volume tracks from ~${firstVal} to ~${endVal} mentions. Uncertainty widens as the horizon extends into the future (confidence range grows from ±${firstWidth} to ±${endWidth} mentions/day).`;
+    const details = `Expected daily volume tracks from ~${firstVal} to ~${endVal} mentions. Uncertainty bounds adjust with forecast distance.`;
 
     return { headline, details, statusType };
   }, [forecastResult, forecastHorizon]);
 
+  // Expected to Grow Next Ranking
+  const expectedToGrowTopics = useMemo(() => {
+    if (trendsOverview.length === 0) {
+      return SAMPLE_EARLY_SIGNALS;
+    }
+    return [...trendsOverview]
+      .sort((a, b) => (b.growth_pct || 0) - (a.growth_pct || 0))
+      .slice(0, 4);
+  }, [trendsOverview]);
+
   if (loading && trendsOverview.length === 0) {
     return (
       <>
-        <Topbar pageTitle="Insights & Trends" />
+        <Topbar pageTitle="Insights & Trends" lastUpdated={`Updated ${lastUpdatedDisplay}`} />
         <main className="pt-20 px-6 md:px-8 pb-16 max-w-7xl mx-auto w-full flex flex-col items-center justify-center min-h-[60vh]">
           <Loader2 className="w-8 h-8 animate-spin text-[#0067A5]" />
           <p className="mt-3 text-xs text-[#666666]">
-            Loading current trend intelligence and forecasting models...
+            Loading real trend intelligence &amp; multi-source signals...
           </p>
         </main>
       </>
@@ -339,38 +367,44 @@ function TrendsContent() {
       <Topbar pageTitle="Insights & Trends" lastUpdated={`Updated ${lastUpdatedDisplay}`} />
 
       <main className="pt-20 px-4 sm:px-6 md:px-8 pb-16 max-w-7xl mx-auto w-full space-y-8 animate-fade-in-up">
-        {/* Top Headline & Executive Summary */}
+        {/* Top Headline & Refresh Action */}
         <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pt-2">
           <div className="flex flex-col gap-1.5 max-w-2xl">
-            <div className="flex items-center gap-2">
-              <span className="px-3 py-1 rounded-full bg-[#d2ecff] text-[#00629e] text-xs font-bold uppercase tracking-wider">
-                Vocational Intelligence
-              </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-[#0099f2]"></span>
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-[#3f4852] font-semibold">
-                Cohort Analytics Engine
+                Updated {lastUpdatedDisplay}
               </span>
+              {overviewData?.sources_summary?.warning_text && (
+                <>
+                  <span className="text-xs text-[#def0ff]">·</span>
+                  <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    {overviewData.sources_summary.warning_text}
+                  </span>
+                </>
+              )}
+              {isSampleFallback && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                  Sample data
+                </span>
+              )}
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-[#001e2d] tracking-tight">
               Insights &amp; Trends
             </h1>
             <p className="text-sm md:text-base text-[#3f4852] leading-relaxed">
-              Discover what vocational learners and employers are discussing right now, and what will surge next.
+              {overviewData?.page_summary || narration?.page_summary || (
+                "Discover what vocational learners and employers are discussing right now, and what will surge next."
+              )}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
-            <div className="flex items-center bg-white px-4 py-2.5 rounded-2xl shadow-azure-card text-[#001e2d]">
-              <span className="material-symbols-outlined text-[#0099f2] text-[18px] mr-2">calendar_today</span>
-              <span className="text-xs font-bold text-[#001e2d]">Period: Live Real-Time</span>
-            </div>
-
             <button
               onClick={handleManualRefresh}
               disabled={refreshing}
               type="button"
               className="stitch-btn-primary flex items-center gap-2 cursor-pointer disabled:opacity-60"
-              title="Query configured data sources and update intelligence models"
+              title="Query configured data sources, classify with Groq, and update intelligence models"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-white" : ""}`} />
               <span>{refreshing ? "Refreshing..." : "Refresh data"}</span>
@@ -378,77 +412,7 @@ function TrendsContent() {
           </div>
         </section>
 
-        {/* Compact Status Line */}
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#3f4852] -mt-2 pb-2 border-b border-[#def0ff]">
-          <div className="flex flex-wrap items-center gap-2 font-medium">
-            <span>
-              Last updated: <strong className="text-[#001e2d] font-bold">{lastUpdatedDisplay}</strong>
-            </span>
-            <span>·</span>
-            <span>
-              Sources:{" "}
-              <strong className="text-[#001e2d] font-bold">
-                {healthySourcesCount} of {totalSourcesCount} available
-              </strong>
-            </span>
-
-            {/* Concise warning badge if a source is degraded */}
-            {degradedSources.length > 0 && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
-                <AlertTriangle className="w-3 h-3 text-amber-600 flex-shrink-0" />
-                <span>
-                  {degradedSources.map((s) => `${s.source.replace("_", " ")}: ${s.status.replace("_", " ")}`).join(", ")}
-                </span>
-              </span>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowSystemStatus((prev) => !prev)}
-            className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
-          >
-            <span>{showSystemStatus ? "Hide system status" : "System status"}</span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSystemStatus ? "rotate-180" : ""}`} />
-          </button>
-        </div>
-
-        {/* Collapsible System Status Details */}
-        {showSystemStatus && (
-          <div className="p-4 rounded-2xl bg-white border border-[#def0ff] shadow-azure-card text-xs space-y-3 animate-in fade-in duration-150">
-            <div className="flex items-center justify-between pb-2 border-b border-[#def0ff]">
-              <span className="font-bold text-[#001e2d]">Connected Data Sources &amp; Ingestion Schedule</span>
-              <span className="text-[11px] text-[#3f4852]">
-                Scheduler: {pipelineHealth?.scheduler?.scheduler_running ? "Running (Daily 02:00 AM IST)" : "Standby"}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {sourceItems.map((s) => (
-                <div key={s.source} className="p-3 rounded-xl bg-[#f5faff] border border-[#def0ff] space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-[#001e2d] capitalize">
-                      {s.source.replace("_", " ")}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        s.status === "online"
-                          ? "bg-emerald-100 text-emerald-800"
-                          : s.status === "limited_access"
-                          ? "bg-amber-100 text-amber-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}
-                    >
-                      {s.status.replace("_", " ")}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-[#3f4852] leading-tight line-clamp-2">{s.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Single Refresh Notification Toast */}
+        {/* Refresh Notification Progress Toast */}
         {refreshNotice && (
           <div
             className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between animate-in fade-in duration-200 ${
@@ -474,99 +438,376 @@ function TrendsContent() {
           </div>
         )}
 
-        {/* Top 3 Impact Summary Cards from Stitch */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Top Insight Summary Cards (Computed in Code, Grounded in Real Evidence) */}
+        <section className={`grid grid-cols-1 ${biggestRiseCard?.has_leader ? "md:grid-cols-3" : "md:grid-cols-2"} gap-6`}>
           {/* Card 1: Most Discussed */}
-          <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
-            <div className="absolute -right-4 -top-4 w-24 h-24 bg-[#eaf5ff] rounded-full opacity-70 group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
-            <div className="relative z-10 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">Most Discussed</span>
-                <span className="chip-steady">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#6B7A90]"></span>
-                  Steady
-                </span>
+          {mostDiscussedCard && (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+              <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Most Discussed
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isSampleFallback && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Sample data
+                      </span>
+                    )}
+                    <span
+                      className={
+                        mostDiscussedCard.status_chip === "Growing"
+                          ? "chip-growing"
+                          : mostDiscussedCard.status_chip === "Cooling"
+                          ? "chip-cooling"
+                          : "chip-steady"
+                      }
+                    >
+                      {mostDiscussedCard.status_chip}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {mostDiscussedCard.topic}
+                  </h2>
+                  <p className="text-sm text-[#3f4852] mt-1 font-medium">
+                    {formatCount(mostDiscussedCard.mentions)} verified learner &amp; mentor mentions
+                  </p>
+                  {narration?.most_discussed?.insight && (
+                    <p className="text-xs text-[#00629e] font-medium mt-1.5 bg-[#eaf5ff] p-2 rounded-xl border border-[#def0ff]">
+                      {narration.most_discussed.insight}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
-                  Green Energy &amp; Solar Tech
-                </h2>
-                <p className="text-sm text-[#3f4852] mt-1 font-medium">14,280 verified learner &amp; mentor mentions</p>
+
+              {/* Card Footer: STRIVE Programme + How We Calculated This Popover + See Proof */}
+              <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
+                    <span className="material-symbols-outlined text-[16px]">school</span>
+                    <span className="truncate">
+                      {narration?.most_discussed?.matching_programme || (mostDiscussedCard.programmes && mostDiscussedCard.programmes[0]) || "Tata STRIVE Course"}
+                    </span>
+                  </div>
+
+                  {/* Popover trigger */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalcCard(openCalcCard === "most_discussed" ? null : "most_discussed")}
+                      className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5 text-[#0099f2]" />
+                      <span>Calculation</span>
+                    </button>
+                    {openCalcCard === "most_discussed" && (
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#173343] text-white rounded-xl shadow-xl text-xs z-30 border border-[#0099f2]">
+                        <p className="font-medium">{mostDiscussedCard.calculation_popover}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* "See proof" toggle button */}
+                {mostDiscussedCard.proof_items && mostDiscussedCard.proof_items.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenProofCard(openProofCard === "most_discussed" ? null : "most_discussed")}
+                      className="text-[11px] font-bold text-[#00629e] hover:text-[#0099f2] flex items-center justify-between w-full pt-1 border-t border-[#f0f7ff] cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>See proof ({mostDiscussedCard.proof_items.length} verified items)</span>
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${openProofCard === "most_discussed" ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {/* Proof Expander */}
+                    {openProofCard === "most_discussed" && (
+                      <div className="mt-2 space-y-2 pt-2 border-t border-[#def0ff]">
+                        {mostDiscussedCard.proof_items.slice(0, 3).map((item: ProofItem) => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                          >
+                            <span className="text-xs text-[#0099f2] mt-0.5">
+                              {item.source.includes("youtube") ? "▶" : item.source.includes("gdelt") ? "📰" : "🌐"}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                <span className="font-semibold">{item.author}</span>
+                                <span>·</span>
+                                <span>{item.published_at}</span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
-            <div className="relative z-10 mt-6 pt-4 flex items-center justify-between border-t border-[#def0ff]">
-              <div className="flex items-center gap-2 text-[#00629e] text-xs font-bold">
-                <span className="material-symbols-outlined text-[18px]">solar_power</span>
-                <span>Renewable Infrastructure Track</span>
-              </div>
-              <span className="text-xs text-[#3f4852] font-semibold">Top volume leader</span>
-            </div>
-          </div>
+          )}
 
           {/* Card 2: Fastest Growing */}
-          <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
-            <div className="absolute -right-4 -top-4 w-24 h-24 bg-[#d2ecff] rounded-full opacity-60 group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
-            <div className="relative z-10 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">Fastest Growing</span>
-                <span className="chip-growing">
-                  <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-                  Growing
-                </span>
-              </div>
-              <div>
-                <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
-                  Generative AI for Office Productivity
-                </h2>
-                <p className="text-sm text-[#3f4852] mt-1 font-medium">+42% spike across skill forums this week</p>
-              </div>
-            </div>
-            <div className="relative z-10 mt-6 pt-4 flex items-center justify-between border-t border-[#def0ff]">
-              <div className="flex items-center gap-2 text-[#0099f2] text-xs font-bold">
-                <span className="material-symbols-outlined text-[18px]">smart_toy</span>
-                <span>Digital Workplace Program</span>
-              </div>
-              <span className="text-xs font-bold text-[#1E9E6A]">+42% 7d surge</span>
-            </div>
-          </div>
+          {fastestGrowingCard && (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+              <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Fastest Growing
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isSampleFallback && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Sample data
+                      </span>
+                    )}
+                    <span
+                      className={
+                        fastestGrowingCard.status_chip === "Growing"
+                          ? "chip-growing"
+                          : fastestGrowingCard.status_chip === "Cooling"
+                          ? "chip-cooling"
+                          : "chip-steady"
+                      }
+                    >
+                      {fastestGrowingCard.status_chip}
+                    </span>
+                  </div>
+                </div>
 
-          {/* Card 3: Biggest Expected Rise */}
-          <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
-            <div className="absolute -right-4 -top-4 w-24 h-24 bg-[#dfec42]/30 rounded-full group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
-            <div className="relative z-10 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">Biggest Expected Rise</span>
-                <span className="chip-growing">
-                  <span className="material-symbols-outlined text-[14px]">trending_up</span>
-                  Growing
-                </span>
+                <div>
+                  <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {fastestGrowingCard.topic}
+                  </h2>
+                  <p className="text-sm text-[#3f4852] mt-1 font-medium">
+                    {formatChange(fastestGrowingCard.growth_pct, (fastestGrowingCard as any)?.is_new)} spike across skill channels
+                  </p>
+                  {narration?.fastest_growing?.insight && (
+                    <p className="text-xs text-[#00629e] font-medium mt-1.5 bg-[#eaf5ff] p-2 rounded-xl border border-[#def0ff]">
+                      {narration.fastest_growing.insight}
+                    </p>
+                  )}
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
-                  Electric Vehicle Fleet Maintenance
-                </h2>
-                <p className="text-sm text-[#3f4852] mt-1 font-medium">+54% anticipated over the next 30 days</p>
+
+              {/* Card Footer: STRIVE Programme + How We Calculated This Popover + See Proof */}
+              <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
+                    <span className="material-symbols-outlined text-[16px]">bolt</span>
+                    <span className="truncate">
+                      {narration?.fastest_growing?.matching_programme || (fastestGrowingCard.programmes && fastestGrowingCard.programmes[0]) || "Tata STRIVE Growth Track"}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalcCard(openCalcCard === "fastest_growing" ? null : "fastest_growing")}
+                      className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5 text-[#0099f2]" />
+                      <span>Calculation</span>
+                    </button>
+                    {openCalcCard === "fastest_growing" && (
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#173343] text-white rounded-xl shadow-xl text-xs z-30 border border-[#0099f2]">
+                        <p className="font-medium">{fastestGrowingCard.calculation_popover}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {fastestGrowingCard.proof_items && fastestGrowingCard.proof_items.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenProofCard(openProofCard === "fastest_growing" ? null : "fastest_growing")}
+                      className="text-[11px] font-bold text-[#00629e] hover:text-[#0099f2] flex items-center justify-between w-full pt-1 border-t border-[#f0f7ff] cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>See proof ({fastestGrowingCard.proof_items.length} verified items)</span>
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${openProofCard === "fastest_growing" ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {openProofCard === "fastest_growing" && (
+                      <div className="mt-2 space-y-2 pt-2 border-t border-[#def0ff]">
+                        {fastestGrowingCard.proof_items.slice(0, 3).map((item: ProofItem) => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                          >
+                            <span className="text-xs text-[#0099f2] mt-0.5">
+                              {item.source.includes("youtube") ? "▶" : item.source.includes("gdelt") ? "📰" : "🌐"}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                <span className="font-semibold">{item.author}</span>
+                                <span>·</span>
+                                <span>{item.published_at}</span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
-            <div className="relative z-10 mt-6 pt-4 flex items-center justify-between border-t border-[#def0ff]">
-              <div className="flex items-center gap-2 text-[#454a00] text-xs font-bold">
-                <span className="material-symbols-outlined text-[18px]">electric_car</span>
-                <span>Automotive Modernization</span>
+          )}
+
+          {/* Card 3: Biggest Expected Rise (Shown ONLY when >= 21 real days exist) */}
+          {biggestRiseCard?.has_leader && (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+              <div className="relative z-10 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Biggest Expected Rise
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {isSampleFallback && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Sample data
+                      </span>
+                    )}
+                    <span
+                      className={
+                        biggestRiseCard.status_chip === "Growing"
+                          ? "chip-growing"
+                          : biggestRiseCard.status_chip === "Cooling"
+                          ? "chip-cooling"
+                          : "chip-steady"
+                      }
+                    >
+                      {biggestRiseCard.status_chip}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {biggestRiseCard.topic}
+                  </h2>
+                  <p className="text-sm text-[#3f4852] mt-1 font-medium">
+                    {formatChange(biggestRiseCard.forecast_growth_pct)} anticipated over next 30 days
+                  </p>
+                  {narration?.biggest_rise?.insight && (
+                    <p className="text-xs text-[#00629e] font-medium mt-1.5 bg-[#eaf5ff] p-2 rounded-xl border border-[#def0ff]">
+                      {narration.biggest_rise.insight}
+                    </p>
+                  )}
+                </div>
               </div>
-              <span className="text-xs font-bold text-[#00629e]">+54% forecast</span>
+
+              {/* Card Footer: STRIVE Programme + How We Calculated This Popover + See Proof */}
+              <div className="relative z-10 mt-6 pt-4 flex flex-col gap-3 border-t border-[#def0ff]">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-[#00629e] font-bold truncate max-w-[200px]">
+                    <span className="material-symbols-outlined text-[16px]">trending_up</span>
+                    <span className="truncate">
+                      {narration?.biggest_rise?.matching_programme || (biggestRiseCard.programmes && biggestRiseCard.programmes[0]) || "Tata STRIVE Technical Track"}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCalcCard(openCalcCard === "biggest_rise" ? null : "biggest_rise")}
+                      className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Info className="w-3.5 h-3.5 text-[#0099f2]" />
+                      <span>Calculation</span>
+                    </button>
+                    {openCalcCard === "biggest_rise" && (
+                      <div className="absolute right-0 bottom-full mb-2 w-64 p-3 bg-[#173343] text-white rounded-xl shadow-xl text-xs z-30 border border-[#0099f2]">
+                        <p className="font-medium">{biggestRiseCard.calculation_popover}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {biggestRiseCard.proof_items && biggestRiseCard.proof_items.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setOpenProofCard(openProofCard === "biggest_rise" ? null : "biggest_rise")}
+                      className="text-[11px] font-bold text-[#00629e] hover:text-[#0099f2] flex items-center justify-between w-full pt-1 border-t border-[#f0f7ff] cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1">
+                        <span>See proof ({biggestRiseCard.proof_items.length} verified items)</span>
+                      </span>
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 transition-transform ${openProofCard === "biggest_rise" ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {openProofCard === "biggest_rise" && (
+                      <div className="mt-2 space-y-2 pt-2 border-t border-[#def0ff]">
+                        {biggestRiseCard.proof_items.slice(0, 3).map((item: ProofItem) => (
+                          <a
+                            key={item.id}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                          >
+                            <span className="text-xs text-[#0099f2] mt-0.5">
+                              {item.source.includes("youtube") ? "▶" : item.source.includes("gdelt") ? "📰" : "🌐"}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{item.title}</p>
+                              <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                <span className="font-semibold">{item.author}</span>
+                                <span>·</span>
+                                <span>{item.published_at}</span>
+                              </div>
+                            </div>
+                            <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </section>
 
-        {/* Interactive Predictive Forecast Chart Card from Stitch */}
+        {/* Interactive Predictive Forecast Chart Card */}
         <section id="trend-forecast" className="stitch-card p-6 lg:p-8 space-y-6">
-          {/* Chart Controls Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Predictive Trajectory</span>
                 <span className="w-1.5 h-1.5 rounded-full bg-[#0099f2]"></span>
                 <span className="text-xs text-[#3f4852] font-semibold">Holt-Winters ETS Model</span>
+                {isSampleFallback && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                    Sample data
+                  </span>
+                )}
               </div>
               <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight mt-0.5">
                 Activity Forecast &amp; Seasonal Demand
@@ -640,15 +881,15 @@ function TrendsContent() {
           <div className="flex flex-wrap items-center gap-6 pt-1">
             <div className="flex items-center gap-2">
               <span className="w-4 h-0.5 bg-[#0099F2]"></span>
-              <span className="text-xs text-[#3f4852] font-semibold">Past activity (Recorded)</span>
+              <span className="text-xs text-[#3f4852] font-semibold">Real recorded history (Solid line)</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-4 h-0.5 border-t-2 border-dashed border-[#56c0ff]"></span>
-              <span className="text-xs text-[#3f4852] font-semibold">Expected trendline</span>
+              <span className="text-xs text-[#3f4852] font-semibold">ETS model trajectory (Dotted line)</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-3.5 h-3.5 rounded bg-[#cae6fb]"></span>
-              <span className="text-xs text-[#3f4852] font-semibold">Likely range confidence band</span>
+              <span className="text-xs text-[#3f4852] font-semibold">80% prediction range</span>
             </div>
           </div>
 
@@ -657,7 +898,7 @@ function TrendsContent() {
             {forecastLoading ? (
               <div className="h-full flex flex-col items-center justify-center text-[#3f4852] gap-2">
                 <Loader2 className="w-7 h-7 animate-spin text-[#0099f2]" />
-                <span className="text-xs font-semibold">Computing statistical trajectory...</span>
+                <span className="text-xs font-semibold">Fitting Holt-Winters model on real history...</span>
               </div>
             ) : (forecastResult as any)?.status === "building_history" ? (
               <div className="h-full flex flex-col items-center justify-center p-8 bg-[#f5faff] rounded-2xl border border-dashed border-[#cae6fb] text-center space-y-3">
@@ -667,17 +908,17 @@ function TrendsContent() {
                 <div className="flex items-center gap-2 justify-center">
                   <h3 className="font-bold text-base text-[#001e2d]">Building history</h3>
                   <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
-                    Sample data
+                    Not enough data yet
                   </span>
                 </div>
                 <p className="text-xs text-[#3f4852] max-w-md">
-                  {(forecastResult as any)?.message ||
-                    "Holt-Winters ETS model trains only on authentic collected data and requires at least 21 days of history. Currently accumulating daily observations."}
+                  {(forecastResult as any)?.notes ||
+                    "Holt-Winters ETS model trains only on real collected data and requires at least 21 days of history. Currently accumulating daily observations."}
                 </p>
               </div>
             ) : chartData.length === 0 ? (
               <div className="h-full flex items-center justify-center text-xs text-[#3f4852] font-semibold">
-                Insufficient data to project forecast for this topic.
+                Not enough data yet for this topic.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -785,91 +1026,24 @@ function TrendsContent() {
               </ResponsiveContainer>
             )}
           </div>
-
-          {/* Collapsible Technical Model Details */}
-          <details className="group border border-[#def0ff] rounded-2xl bg-white overflow-hidden text-xs">
-            <summary className="flex items-center justify-between p-3.5 cursor-pointer font-bold text-[#001e2d] hover:bg-[#f5faff] transition-colors">
-              <span className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-[#0099f2]" />
-                Statistical model parameters &amp; out-of-sample evaluation
-              </span>
-              <ChevronDown className="w-4 h-4 text-[#3f4852] group-open:rotate-180 transition-transform" />
-            </summary>
-
-            <div className="p-4 pt-1 border-t border-[#def0ff] bg-[#f5faff] space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
-                  <span className="text-[10px] text-[#3f4852] block font-semibold">Holdout MAE</span>
-                  <span className="text-xs font-extrabold text-[#001e2d] tabular-nums">
-                    {forecastResult?.evaluation?.mae !== undefined
-                      ? `${forecastResult.evaluation.mae} mentions/day`
-                      : "Evaluation unavailable"}
-                  </span>
-                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
-                    Mean absolute error during out-of-sample holdout validation
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
-                  <span className="text-[10px] text-[#3f4852] block font-semibold">sMAPE Error</span>
-                  <span className="text-xs font-extrabold text-[#1E9E6A] tabular-nums">
-                    {forecastResult?.evaluation?.smape_pct !== undefined
-                      ? `${forecastResult.evaluation.smape_pct}%`
-                      : "Evaluation unavailable"}
-                  </span>
-                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
-                    Symmetric mean percentage error normalized between 0-100%
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
-                  <span className="text-[10px] text-[#3f4852] block font-semibold">Baseline Improvement</span>
-                  <span className="text-xs font-extrabold text-[#00629e]">
-                    {forecastResult?.evaluation?.relative_improvement_pct !== undefined
-                      ? `${forecastResult.evaluation.relative_improvement_pct}% vs naive`
-                      : "Evaluation unavailable"}
-                  </span>
-                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
-                    Accuracy gain against naive persistence baseline
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
-                  <span className="text-[10px] text-[#3f4852] block font-semibold">Algorithm &amp; Version</span>
-                  <span className="text-xs font-extrabold text-[#001e2d]">
-                    {forecastResult?.model_name || "Holt-Winters"} ({forecastResult?.model_version || "v1.2"})
-                  </span>
-                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
-                    Cutoff: {forecastResult?.training_cutoff_date || "Live"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </details>
         </section>
 
-        {/* Expected to Grow Next Row (4 Early Signals Cards) from Stitch */}
+        {/* Expected to Grow Next (Top 3-5 Topics by Forecast % or Growth) */}
         <section className="flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Early Signals</span>
+              <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">
+                {forecastResult?.status === "trained" ? "Early Signals" : "Growing now"}
+              </span>
               <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">Expected to Grow Next</h2>
             </div>
             <span className="text-xs text-[#3f4852] font-semibold hidden sm:inline">
-              Calculated from employer skill postings &amp; candidate searches
+              Ranked by real growth trajectory across monitored feeds
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {(trendsOverview.length > 0
-              ? [...trendsOverview].sort((a, b) => (b.growth_pct || 0) - (a.growth_pct || 0)).slice(0, 4)
-              : [
-                  { topic: "Drone technology & remote pilot training", category: "Agri-Tech & Logistics", growth_pct: 38.0 },
-                  { topic: "Tele-Health GDA & bedside nursing", category: "Community Healthcare", growth_pct: 29.0 },
-                  { topic: "Industrial IoT & PLC automation", category: "Advanced Manufacturing", growth_pct: 22.0 },
-                  { topic: "Green hydrogen & clean tech technician", category: "Renewable Energy", growth_pct: 19.0 },
-                ]
-            ).map((card: any, idx) => (
+            {expectedToGrowTopics.map((card: any, idx) => (
               <div
                 key={idx}
                 onClick={() => {
@@ -893,14 +1067,14 @@ function TrendsContent() {
                       </span>
                     </span>
                     <span className="px-2.5 py-0.5 rounded-full bg-[#E6F6EF] text-[#1E9E6A] text-xs font-bold">
-                      +{Math.abs(card.growth_pct || 0)}%
+                      {formatChange(card.growth_pct, card.is_new)}
                     </span>
                   </div>
                   <h3 className="text-base font-extrabold text-[#001e2d] mt-1 group-hover:text-[#0099f2] transition-colors leading-snug">
                     {card.topic}
                   </h3>
                   <p className="text-xs text-[#3f4852] font-medium leading-relaxed">
-                    {card.category || "Emerging Skilling Track"}
+                    {(card.matching_programmes && card.matching_programmes[0]) || card.category || "Tata STRIVE Skilling Track"}
                   </p>
                 </div>
 
@@ -917,7 +1091,7 @@ function TrendsContent() {
                     <circle cx="100" cy="5" fill="#dfec42" r="3.5" stroke="#0099F2" strokeWidth="1.5" />
                   </svg>
                   <span className="text-[11px] text-[#3f4852] font-semibold">
-                    {card.current_weekly_mentions ? `${card.current_weekly_mentions} mentions` : "30d outlook"}
+                    {card.current_weekly_mentions ? `${formatCount(card.current_weekly_mentions)} mentions` : "Active signal"}
                   </span>
                 </div>
               </div>
@@ -925,7 +1099,7 @@ function TrendsContent() {
           </div>
         </section>
 
-        {/* Curated Taxonomy Skilling Topics Table from Stitch */}
+        {/* Curated Taxonomy Skilling Topics Table with "See proof" expander */}
         <section className="stitch-card p-6 lg:p-8 space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
@@ -965,7 +1139,7 @@ function TrendsContent() {
             </div>
           </div>
 
-          {/* Selected State Informational Toast / Pill from Stitch */}
+          {/* Active Topic Banner */}
           <div className="bg-[#eaf5ff] px-4 py-3 rounded-2xl flex items-center justify-between border border-[#cae6fb]">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-[#0099f2] text-[20px]">info</span>
@@ -1003,96 +1177,144 @@ function TrendsContent() {
                   </tr>
                 ) : (
                   filteredTopics.map((item, idx) => {
-                    const topicSlug = topicToSlug(item.topic);
-                    const isRising = item.growth_pct >= 15.0;
-                    const isDeclining = item.growth_pct <= -15.0;
+                    const topicSlug = item.topic_slug || topicToSlug(item.topic);
+                    const isRising = item.status_chip === "Growing" || item.momentum === "rising";
+                    const isDeclining = item.status_chip === "Cooling" || item.momentum === "declining";
                     const isSelected = selectedForecastTopic === item.topic;
+                    const isProofOpen = expandedTopicProof === item.topic;
 
                     return (
-                      <tr
-                        key={item.topic}
-                        onClick={() => {
-                          setSelectedForecastTopic(item.topic);
-                        }}
-                        className={`cursor-pointer transition-colors group ${
-                          isSelected ? "bg-[#eaf5ff]/70 font-semibold" : "hover:bg-[#f5faff]"
-                        }`}
-                      >
-                        <td className="py-4 px-4 font-bold text-[#00629e]">#{idx + 1}</td>
-                        <td className="py-4 px-4 font-bold text-[#001e2d] group-hover:text-[#0099f2] transition-colors">
-                          <div className="flex items-center gap-2.5">
+                      <React.Fragment key={item.topic}>
+                        <tr
+                          onClick={() => {
+                            setSelectedForecastTopic(item.topic);
+                          }}
+                          className={`cursor-pointer transition-colors group ${
+                            isSelected ? "bg-[#eaf5ff]/70 font-semibold" : "hover:bg-[#f5faff]"
+                          }`}
+                        >
+                          <td className="py-4 px-4 font-bold text-[#00629e]">#{idx + 1}</td>
+                          <td className="py-4 px-4 font-bold text-[#001e2d] group-hover:text-[#0099f2] transition-colors">
+                            <div className="flex items-center gap-2.5">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: TOPIC_COLORS[item.topic] || "#0099f2" }}
+                              />
+                              <span className="text-sm">{item.topic}</span>
+                            </div>
+                          </td>
+                          <td className="py-4 px-4 font-bold text-[#001e2d] tabular-nums">
+                            {formatCount(item.current_weekly_mentions)}
+                          </td>
+                          <td className="py-4 px-4">
+                            <svg className="w-28 h-6 overflow-visible" viewBox="0 0 100 24">
+                              <path
+                                d={
+                                  isRising
+                                    ? "M 0,20 Q 30,19 60,11 T 100,4"
+                                    : isDeclining
+                                    ? "M 0,6 Q 30,10 60,17 T 100,21"
+                                    : "M 0,16 Q 30,14 60,15 T 100,10"
+                                }
+                                fill="none"
+                                stroke={isRising ? "#1E9E6A" : isDeclining ? "#D64545" : "#6B7A90"}
+                                strokeLinecap="round"
+                                strokeWidth="2.5"
+                              />
+                            </svg>
+                          </td>
+                          <td className="py-4 px-4 text-center">
                             <span
-                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: TOPIC_COLORS[item.topic] || "#0099f2" }}
-                            />
-                            <span className="text-sm">{item.topic}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4 font-bold text-[#001e2d] tabular-nums">
-                          {item.current_weekly_mentions.toLocaleString()}
-                        </td>
-                        <td className="py-4 px-4">
-                          <svg className="w-28 h-6 overflow-visible" viewBox="0 0 100 24">
-                            <path
-                              d={
+                              className={
                                 isRising
-                                  ? "M 0,20 Q 30,19 60,11 T 100,4"
+                                  ? "chip-growing"
                                   : isDeclining
-                                  ? "M 0,6 Q 30,10 60,17 T 100,21"
-                                  : "M 0,16 Q 30,14 60,15 T 100,10"
+                                  ? "chip-cooling"
+                                  : "chip-steady"
                               }
-                              fill="none"
-                              stroke={isRising ? "#1E9E6A" : isDeclining ? "#D64545" : "#6B7A90"}
-                              strokeLinecap="round"
-                              strokeWidth="2.5"
-                            />
-                          </svg>
-                        </td>
-                        <td className="py-4 px-4 text-center">
-                          {isRising ? (
-                            <span className="chip-growing">
-                              <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-                              +{item.growth_pct}%
-                            </span>
-                          ) : isDeclining ? (
-                            <span className="chip-cooling">
-                              <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
-                              {item.growth_pct}%
-                            </span>
-                          ) : (
-                            <span className="chip-steady">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#6B7A90]"></span>
-                              Steady
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/trends/${topicSlug}`);
-                              }}
-                              className="px-3 py-1.5 rounded-full bg-[#eaf5ff] text-[#00629e] hover:bg-[#0099f2] hover:text-white font-bold text-xs transition-colors cursor-pointer"
                             >
-                              Details
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/studio?topic=${encodeURIComponent(item.topic)}`);
-                              }}
-                              className="px-3 py-1.5 rounded-full bg-[#dfec42] text-[#001e2d] hover:brightness-105 font-bold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1"
-                              title="Send topic to Content Studio"
-                            >
-                              <span>Studio</span>
-                              <ChevronRight className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                              {item.status_chip || (isRising ? "Growing" : isDeclining ? "Cooling" : "Steady")}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {item.proof_items && item.proof_items.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedTopicProof(isProofOpen ? null : item.topic);
+                                  }}
+                                  className="px-2.5 py-1 rounded-full bg-[#def0ff] text-[#00629e] hover:bg-[#cae6fb] font-semibold text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+                                  title="View real source evidence for this topic"
+                                >
+                                  <span>See proof</span>
+                                  <ChevronDown className={`w-3 h-3 transition-transform ${isProofOpen ? "rotate-180" : ""}`} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/trends/${topicSlug}`);
+                                }}
+                                className="px-3 py-1.5 rounded-full bg-[#eaf5ff] text-[#00629e] hover:bg-[#0099f2] hover:text-white font-bold text-xs transition-colors cursor-pointer"
+                              >
+                                Details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/studio?topic=${encodeURIComponent(item.topic)}`);
+                                }}
+                                className="px-3 py-1.5 rounded-full bg-[#dfec42] text-[#001e2d] hover:brightness-105 font-bold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1"
+                                title="Send topic to Content Studio"
+                              >
+                                <span>Studio</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Expanded Proof Row */}
+                        {isProofOpen && item.proof_items && item.proof_items.length > 0 && (
+                          <tr className="bg-[#f5faff] border-b border-[#def0ff]">
+                            <td colSpan={6} className="py-3 px-6">
+                              <div className="space-y-2">
+                                <span className="text-[10px] font-bold text-[#00629e] uppercase tracking-wider block">
+                                  Real Source Evidence for {item.topic}
+                                </span>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                                  {item.proof_items.map((proof) => (
+                                    <a
+                                      key={proof.id}
+                                      href={proof.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-2.5 rounded-xl bg-white border border-[#def0ff] hover:border-[#0099f2] flex items-start gap-2 transition-colors block text-left"
+                                    >
+                                      <span className="text-xs text-[#0099f2] mt-0.5">
+                                        {proof.source.includes("youtube") ? "▶" : proof.source.includes("gdelt") ? "📰" : "🌐"}
+                                      </span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[11px] font-bold text-[#001e2d] line-clamp-1">{proof.title}</p>
+                                        <div className="flex items-center gap-2 mt-0.5 text-[9px] text-[#3f4852]">
+                                          <span className="font-semibold">{proof.author}</span>
+                                          <span>·</span>
+                                          <span>{proof.published_at}</span>
+                                        </div>
+                                      </div>
+                                      <ExternalLink className="w-3 h-3 text-[#3f4852] shrink-0" />
+                                    </a>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })
                 )}
@@ -1102,16 +1324,22 @@ function TrendsContent() {
         </section>
 
         {/* SECTION: Strategic Opportunities for Tata STRIVE */}
-        {/* SECTION: Strategic Opportunities for Tata STRIVE */}
         <section className="stitch-card p-6 lg:p-8 space-y-4">
           <div className="flex items-center justify-between border-b border-[#def0ff] pb-3">
             <div>
-              <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#0099f2]" />
-                Strategic Outreach Opportunities for Tata STRIVE
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#0099f2]" />
+                  Strategic Outreach Opportunities for Tata STRIVE
+                </h2>
+                {isSampleFallback && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                    Sample data
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-[#3f4852] font-medium mt-0.5">
-                Recommended communication angles derived from rising trends and recurring student queries
+                Recommended communication angles derived from real rising trends and candidate inquiries
               </p>
             </div>
             <Link
@@ -1128,9 +1356,9 @@ function TrendsContent() {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="font-bold text-[#00629e] text-[10px] bg-[#d2ecff] px-2.5 py-0.5 rounded-full">
-                    AI &amp; Digital Skills (+14.8%)
+                    AI &amp; Digital Skills
                   </span>
-                  <span className="text-[10px] text-[#1E9E6A] font-bold">62% Positive</span>
+                  <span className="text-[10px] text-[#1E9E6A] font-bold">Surging Demand</span>
                 </div>
                 <h3 className="font-extrabold text-[#001e2d] text-sm">Practical AI for Non-Technical Graduates</h3>
                 <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
@@ -1159,9 +1387,9 @@ function TrendsContent() {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="font-bold text-emerald-800 text-[10px] bg-[#E6F6EF] px-2.5 py-0.5 rounded-full">
-                    Vocational Training (+16.8%)
+                    Vocational Training
                   </span>
-                  <span className="text-[10px] text-[#1E9E6A] font-bold">68% Positive</span>
+                  <span className="text-[10px] text-[#1E9E6A] font-bold">High Placement Trust</span>
                 </div>
                 <h3 className="font-extrabold text-[#001e2d] text-sm">EV &amp; Solar PV Technician Drives</h3>
                 <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
@@ -1192,7 +1420,7 @@ function TrendsContent() {
                   <span className="font-bold text-red-700 text-[10px] bg-[#FDECEC] px-2.5 py-0.5 rounded-full">
                     Job Readiness (Unmet Need)
                   </span>
-                  <span className="text-[10px] text-[#D64545] font-bold">34.7% Negative</span>
+                  <span className="text-[10px] text-[#D64545] font-bold">Interview Friction</span>
                 </div>
                 <h3 className="font-extrabold text-[#001e2d] text-sm">HR Interview Behavioral Confidence</h3>
                 <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">

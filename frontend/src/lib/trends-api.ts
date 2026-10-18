@@ -1,8 +1,90 @@
+export interface ProofItem {
+  id: string;
+  title: string;
+  source: string;
+  author: string;
+  published_at: string;
+  url: string;
+}
+
+export interface TopCardData {
+  topic: string;
+  topic_slug: string;
+  mentions: number;
+  growth_pct: number;
+  is_new?: boolean;
+  status_chip: "Growing" | "Cooling" | "Steady";
+  calculation_popover: string;
+  proof_items: ProofItem[];
+  programmes: string[];
+}
+
+export interface BiggestRiseCardData {
+  has_leader: boolean;
+  topic?: string | null;
+  topic_slug?: string;
+  forecast_growth_pct?: number;
+  status_chip?: "Growing" | "Cooling" | "Steady";
+  calculation_popover?: string;
+  proof_items?: ProofItem[];
+  programmes?: string[];
+  status?: string;
+  notes?: string;
+}
+
+export interface CardNarration {
+  insight?: string;
+  why_it_matters?: string;
+  matching_programme?: string;
+}
+
+export interface TrendsOverviewResponse {
+  status: string;
+  total_topics: number;
+  topics: TrendTopicOverview[];
+  top_cards: {
+    most_discussed: TopCardData | null;
+    fastest_growing: TopCardData | null;
+    biggest_rise: BiggestRiseCardData | null;
+  };
+  narration?: {
+    page_summary?: string;
+    most_discussed?: CardNarration;
+    fastest_growing?: CardNarration;
+    biggest_rise?: CardNarration;
+  };
+  page_summary?: string;
+  sources_summary?: {
+    healthy_count: number;
+    total_sources: number;
+    warning_text: string;
+    failed_sources: string[];
+    sources: Record<string, any>;
+  };
+  is_sample_fallback?: boolean;
+  total_real_posts?: number;
+  taxonomy: string[];
+}
+
+export function formatCount(count: number | null | undefined): string {
+  if (count === null || count === undefined || isNaN(count)) return "—";
+  return count.toLocaleString();
+}
+
+export function formatChange(changePct: number | null | undefined, isNew?: boolean): string {
+  if (isNew) return "New";
+  if (changePct === null || changePct === undefined || isNaN(changePct)) return "—";
+  return changePct > 0 ? `+${changePct}%` : `${changePct}%`;
+}
+
 export interface TrendTopicOverview {
   topic: string;
+  topic_slug?: string;
   current_weekly_mentions: number;
   prev_weekly_mentions: number;
   growth_pct: number;
+  is_new?: boolean;
+  status_chip?: "Growing" | "Cooling" | "Steady";
   momentum: "rising" | "stable" | "declining";
   total_engagement: number;
   sentiment_breakdown: {
@@ -14,10 +96,14 @@ export interface TrendTopicOverview {
     youtube: number;
     gdelt: number;
   };
+  proof_items?: ProofItem[];
+  matching_programmes?: string[];
   sparkline?: number[];
   latest_date: string;
   data_points_count: number;
+  real_days_count?: number;
 }
+
 
 export interface ForecastPoint {
   date: string;
@@ -181,11 +267,12 @@ export function slugToTopic(slugOrName: string): string {
 }
 
 export const trendsApi = {
-  async getOverview(): Promise<{ topics: TrendTopicOverview[] }> {
+  async getOverview(): Promise<TrendsOverviewResponse> {
     const res = await fetch("/api/trends/overview");
     if (!res.ok) throw new Error("Failed to load trends overview");
     return await res.json();
   },
+
 
   async getDetail(
     topic: string,

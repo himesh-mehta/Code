@@ -29,14 +29,14 @@ class TrendScheduler:
             logger.info("Social Pulse Daily Trend Scheduler started (Asia/Kolkata timezone).")
 
     def _run_loop(self):
-        """Loop running collection job every 1 hour so history builds continuously."""
+        """Loop running collection job every 3 hours as required by the pipeline."""
         while self._is_running:
             try:
                 if self._last_run is None:
                     self.execute_refresh(trigger="initial_startup")
                 else:
-                    self.execute_refresh(trigger="scheduled_hourly")
-                time.sleep(3600)  # Check and fetch every hour
+                    self.execute_refresh(trigger="scheduled_3_hourly")
+                time.sleep(3 * 3600)  # Check and fetch every 3 hours
             except Exception as e:
                 logger.error(f"Scheduler loop encountered error: {e}")
                 time.sleep(60)

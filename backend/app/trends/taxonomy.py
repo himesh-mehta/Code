@@ -4,18 +4,19 @@ from typing import Dict, List, Tuple, Optional, Any
 # Standardized deterministic topic categories for Tata STRIVE (Core + Emerging Early-Signals)
 TOPIC_CATEGORIES = [
     "AI and digital skills",
-    "EV diagnostics and battery tech",
-    "Solar PV installation",
+    "EV and battery",
+    "Solar and green energy",
     "Employability and job readiness",
     "Vocational training",
-    "Internships and placements",
+    "Internships and apprenticeships",
+    "Scholarships and stipends",
     "Entrepreneurship and self-employment",
     "Youth education and counseling",
     "Employer skill requirements",
-    "Industrial IoT and PLC automation",
-    "Green hydrogen plant operations",
-    "Healthcare GDA and tele-health",
-    "Drone assembly and maintenance",
+    "Industrial IoT and PLC",
+    "Green hydrogen",
+    "Healthcare and tele-health",
+    "Drones",
 ]
 
 # Taxonomy dictionary with weighted keywords and phrases
@@ -199,12 +200,137 @@ TAXONOMY_RULES: Dict[str, Dict[str, Any]] = {
         "secondary": [
             "drone", "uav", "quadcopter", "fpv", "drone flight", "payload calibration"
         ]
+    },
+    "Scholarships and stipends": {
+        "slug": "scholarships-and-stipends",
+        "category": "Financial Support & Equity",
+        "description": "Scholarships, stipend schemes, fellowship allowances, and financial assistance for vocational trainees.",
+        "primary": [
+            "scholarship", "stipend", "tata trusts scholarship", "financial aid",
+            "fellowship allowance", "merit scholarship", "fee waiver", "free training",
+            "stipendiary trainee", "dbt stipend", "student scholarship"
+        ],
+        "secondary": [
+            "stipend scheme", "free course", "sponsored training", "allowance",
+            "grant", "subsidized course", "tuition support"
+        ]
+    },
+    "EV and battery": {
+        "slug": "ev-and-battery",
+        "category": "Green Automotive",
+        "description": "Electric vehicle maintenance, battery management systems, diagnostic test benches, and charging infra.",
+        "primary": [
+            "ev diagnostics", "electric vehicle", "ev technician", "battery tech",
+            "battery management system", "bms", "high voltage safety", "ev battery",
+            "charging station", "electric vehicle training", "ev maintenance", "hybrid vehicle"
+        ],
+        "secondary": [
+            "ev", "electric scooter", "electric car", "chakan", "automotive hub",
+            "lithium ion", "diagnostic bench", "powertrain", "ev retrofit"
+        ]
+    },
+    "Solar and green energy": {
+        "slug": "solar-and-green-energy",
+        "category": "Renewable Energy",
+        "description": "Rooftop solar PV installation, micro-grid maintenance, solar inverter setup, and renewable entrepreneurship.",
+        "primary": [
+            "solar pv", "solar installation", "solar technician", "rooftop solar",
+            "solar microgrid", "photovoltaic", "solar inverter", "grid tied inverter",
+            "surya ghar", "pm surya", "solar training", "solar entrepreneurship"
+        ],
+        "secondary": [
+            "solar panel", "clean energy", "renewable energy", "net metering",
+            "solar subsidy", "pv installer", "solar pumping"
+        ]
+    },
+    "Internships and apprenticeships": {
+        "slug": "internships-and-apprenticeships",
+        "category": "Workforce Transition",
+        "description": "Apprenticeships, NAPS/NATS government schemes, on-the-job training, stipends, and hiring fairs.",
+        "primary": [
+            "apprenticeship", "internship", "stipend", "naps", "nats",
+            "on the job training", "ojt", "dual certification", "placement drive",
+            "job fair", "rozgar mela", "hiring drive"
+        ],
+        "secondary": [
+            "apprentice", "intern", "campus drive", "off campus hiring",
+            "walk in interview", "company trainee", "summer internship"
+        ]
+    },
+    "Industrial IoT and PLC": {
+        "slug": "industrial-iot-plc",
+        "category": "Advanced Manufacturing",
+        "description": "Programmable logic controllers, industrial automation, SCADA, sensor interfacing, and smart factory tech.",
+        "primary": [
+            "industrial iot", "plc programming", "industrial automation", "scada",
+            "industry 4 0", "smart factory", "sensor integration", "mechatronics",
+            "siemens plc", "allen bradley"
+        ],
+        "secondary": [
+            "automation", "plc", "iiot", "robotics technician", "controllers",
+            "factory automation"
+        ]
+    },
+    "Green hydrogen": {
+        "slug": "green-hydrogen",
+        "category": "Green Energy Frontier",
+        "description": "Electrolyzer operations, hydrogen fuel safety, green ammonia production, and clean tech plant logistics.",
+        "primary": [
+            "green hydrogen", "electrolyzer", "hydrogen plant", "clean fuel technician",
+            "hydrogen safety", "national green hydrogen mission", "fuel cell technology"
+        ],
+        "secondary": [
+            "hydrogen", "clean tech", "zero emission energy", "electrolysis", "green ammonia"
+        ]
+    },
+    "Healthcare and tele-health": {
+        "slug": "healthcare-and-tele-health",
+        "category": "Healthcare Services",
+        "description": "General duty assistant, patient monitoring, tele-health diagnostics, geriatric care, and medical nursing support.",
+        "primary": [
+            "general duty assistant", "gda technician", "tele health", "patient care assistant",
+            "home healthcare", "geriatric care", "nursing aide", "medical diagnostic assistant"
+        ],
+        "secondary": [
+            "healthcare skilling", "nursing", "hospital assistant", "phlebotomy", "telemedicine"
+        ]
+    },
+    "Drones": {
+        "slug": "drones",
+        "category": "Aviation & Agri-Tech",
+        "description": "Kisan drone pilots, UAV assembly, avionics calibration, payload maintenance, and DGCA certified drone pilot courses.",
+        "primary": [
+            "drone assembly", "drone pilot", "kisan drone", "uav maintenance",
+            "dgca certification", "drone technician", "drone repair", "agricultural drone"
+        ],
+        "secondary": [
+            "drone", "uav", "quadcopter", "fpv", "drone flight", "payload calibration"
+        ]
     }
 }
 
 TOPIC_SLUGS: Dict[str, str] = {
     rule["slug"]: topic for topic, rule in TAXONOMY_RULES.items()
 }
+
+# Aliases mapping legacy or alternate labels to canonical topics
+TOPIC_ALIASES: Dict[str, str] = {
+    "ev diagnostics and battery tech": "EV and battery",
+    "ev-diagnostics": "EV and battery",
+    "solar pv installation": "Solar and green energy",
+    "solar-pv": "Solar and green energy",
+    "internships and placements": "Internships and apprenticeships",
+    "internships-and-placements": "Internships and apprenticeships",
+    "industrial iot and plc automation": "Industrial IoT and PLC",
+    "green hydrogen plant operations": "Green hydrogen",
+    "healthcare gda and tele-health": "Healthcare and tele-health",
+    "tele-health-gda": "Healthcare and tele-health",
+    "drone assembly and maintenance": "Drones",
+    "drone-technology": "Drones",
+    "entrepreneurship": "Entrepreneurship and self-employment",
+    "youth education": "Youth education and counseling",
+}
+
 
 def clean_text(text: str) -> str:
     """Normalize text by lowercasing, stripping URLs, punctuation, and redundant whitespace."""
@@ -265,6 +391,8 @@ def slug_to_topic(slug_or_name: str) -> Optional[str]:
     if not slug_or_name:
         return None
     clean_slug = slug_or_name.lower().strip()
+    if clean_slug in TOPIC_ALIASES:
+        return TOPIC_ALIASES[clean_slug]
     if clean_slug in TOPIC_SLUGS:
         return TOPIC_SLUGS[clean_slug]
     for t in TOPIC_CATEGORIES:

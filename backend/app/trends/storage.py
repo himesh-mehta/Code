@@ -172,15 +172,85 @@ class TrendStorage:
         self._save()
 
     def get_topic_series(self, topic: str, days: int = 90) -> List[DailyObservation]:
-        """Retrieve chronological daily observations for a topic."""
-        filtered = [o for o in self.observations if o.topic == topic]
-        filtered.sort(key=lambda x: x.date)
-        if days:
-            return filtered[-days:]
-        return filtered
+        """Retrieve chronological daily observations for a topic directly from SQLite or baseline."""
+        from ..db import get_db_connection, get_total_posts_count
+        topic_slug = topic_to_slug(topic)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT date, topic_name, mentions, youtube_count, gdelt_count, engagement,
+                   positive_count, neutral_count, negative_count, sentiment_score, is_simulated
+            FROM daily_topic_metrics
+            WHERE (topic_id = ? OR topic_name = ?)
+            ORDER BY date ASC
+        """, (topic_slug, topic))
+        rows = cursor.fetchall()
+        conn.close()
+
+        if rows:
+            obs = [
+                DailyObservation(
+                    date=r["date"],
+                    topic=topic,
+                    mentions=r["mentions"],
+                    youtube_count=r["youtube_count"],
+                    gdelt_count=r["gdelt_count"],
+                    total_engagement=r["engagement"] or 0,
+                    positive_count=r["positive_count"],
+                    neutral_count=r["neutral_count"],
+                    negative_count=r["negative_count"],
+                    sentiment_score=float(r["sentiment_score"] or 0.0),
+                    is_simulated=bool(r["is_simulated"]),
+                )
+                for r in rows
+            ]
+            if days:
+                return obs[-days:]
+            return obs
+
+        # If SQLite has no metric rows and < 30 total posts, fallback to baseline
+        total_stored = get_total_posts_count()
+        if total_stored < 30:
+            filtered = [o for o in self.observations if o.topic == topic or topic_to_slug(o.topic) == topic_slug]
+            filtered.sort(key=lambda x: x.date)
+            if days:
+                return filtered[-days:]
+            return filtered
+
+        return []
+
+    def get_proof_items_for_topic(self, topic: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """Queries 2-3 real evidence posts from SQLite for this topic."""
+        from ..db import get_db_connection
+        topic_slug = topic_to_slug(topic)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, source, author, text, url, published_at, likes, comments
+            FROM posts
+            WHERE topic_id = ? OR topic_name = ?
+            ORDER BY (likes + comments) DESC, published_at DESC
+            LIMIT ?
+        """, (topic_slug, topic, limit))
+        rows = cursor.fetchall()
+        conn.close()
+
+        items = []
+        for r in rows:
+            items.append({
+                "id": r["id"],
+                "title": (r["text"] or "").strip().split("\n")[0][:110],
+                "source": r["source"],
+                "author": r["author"] or "Verified Source",
+                "published_at": (r["published_at"] or "")[:10],
+                "url": r["url"] or "https://tatastrive.com",
+            })
+        return items
 
     def get_all_topics_current_summary(self) -> List[Dict[str, Any]]:
-        """Calculate current metrics, 7-day growth, momentum, and sentiment for all topics."""
+        """Calculate current metrics, 7-day growth, status chip, proof items, and sentiment for all topics."""
+        from .tatastrive_catalog import get_matching_strive_programmes
         summary = []
         now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -194,16 +264,23 @@ class TrendStorage:
             prev_7 = series[-14:-7] if len(series) >= 14 else []
 
             recent_vol = sum(o.mentions for o in recent_7)
-            prev_vol = sum(o.mentions for o in prev_7) if prev_7 else max(1, recent_vol - 5)
+            prev_vol = sum(o.mentions for o in prev_7) if prev_7 else 0
 
-            growth_pct = round(((recent_vol - prev_vol) / max(1, prev_vol)) * 100, 1)
+            is_new = (prev_vol == 0 and recent_vol > 0)
+            if prev_vol > 0:
+                growth_pct = round(((recent_vol - prev_vol) / prev_vol) * 100, 1)
+            else:
+                growth_pct = 0.0 if recent_vol == 0 else 100.0
 
-            # Momentum classification
-            if growth_pct >= 15.0:
+            # Status chip per topic: Growing above +3%, Cooling below -3%, otherwise Steady
+            if growth_pct > 3.0:
+                status_chip = "Growing"
                 momentum = "rising"
-            elif growth_pct <= -15.0:
+            elif growth_pct < -3.0:
+                status_chip = "Cooling"
                 momentum = "declining"
             else:
+                status_chip = "Steady"
                 momentum = "stable"
 
             # Aggregate sentiment
@@ -216,11 +293,17 @@ class TrendStorage:
             gdelt_total = sum(o.gdelt_count for o in recent_7)
             eng_total = sum(o.total_engagement for o in recent_7)
 
+            proof_items = self.get_proof_items_for_topic(topic, limit=3)
+            matching_progs = get_matching_strive_programmes(topic)
+
             summary.append({
                 "topic": topic,
+                "topic_slug": topic_to_slug(topic),
                 "current_weekly_mentions": recent_vol,
                 "prev_weekly_mentions": prev_vol,
                 "growth_pct": growth_pct,
+                "is_new": is_new,
+                "status_chip": status_chip,
                 "momentum": momentum,
                 "total_engagement": eng_total,
                 "sentiment_breakdown": {
@@ -232,13 +315,142 @@ class TrendStorage:
                     "youtube": yt_total,
                     "gdelt": gdelt_total,
                 },
+                "proof_items": proof_items,
+                "matching_programmes": matching_progs,
                 "sparkline": [o.mentions for o in recent_7] if len(series) >= 7 else [],
                 "latest_date": series[-1].date if series else now_str,
                 "data_points_count": len(series),
+                "real_days_count": sum(1 for o in series if not o.is_simulated),
             })
 
         summary.sort(key=lambda x: x["current_weekly_mentions"], reverse=True)
         return summary
+
+    def get_top_insight_cards(self, summary: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Computes the three top cards strictly in code:
+        1. Most Discussed: topic with highest mentions in the last 7 days.
+        2. Fastest Growing: highest % change vs previous 7 days (min 20 mentions in current period; if prev=0, show 'New').
+        3. Biggest Expected Rise: highest forecast % change over next 30 days from Holt-Winters ETS (requires >= 21 real days; else hidden/building_history).
+        """
+        from .forecasting import forecaster
+        from .tatastrive_catalog import get_matching_strive_programmes
+
+        if summary is None:
+            summary = self.get_all_topics_current_summary()
+
+        if not summary:
+            return {
+                "most_discussed": None,
+                "fastest_growing": None,
+                "biggest_rise": None,
+            }
+
+        # 1. Most Discussed: highest mentions in last 7 days
+        sorted_by_vol = sorted(summary, key=lambda x: x["current_weekly_mentions"], reverse=True)
+        md_item = sorted_by_vol[0] if sorted_by_vol else None
+
+        most_discussed = None
+        if md_item:
+            most_discussed = {
+                "topic": md_item["topic"],
+                "topic_slug": md_item["topic_slug"],
+                "mentions": md_item["current_weekly_mentions"],
+                "growth_pct": md_item["growth_pct"],
+                "status_chip": md_item["status_chip"],
+                "calculation_popover": f"Counted from {md_item['current_weekly_mentions']} verified posts and videos in the last 7 days across monitored sources.",
+                "proof_items": md_item["proof_items"],
+                "programmes": md_item["matching_programmes"],
+            }
+
+        # 2. Fastest Growing: highest % change vs previous 7 days, min 20 mentions in current period
+        eligible_for_growth = [t for t in summary if t["current_weekly_mentions"] >= 20]
+        if not eligible_for_growth:
+            # Fallback to any topic with mentions > 0
+            eligible_for_growth = [t for t in summary if t["current_weekly_mentions"] > 0]
+
+        sorted_by_growth = sorted(
+            eligible_for_growth,
+            key=lambda x: (x["growth_pct"] if not x.get("is_new") else 999.0),
+            reverse=True
+        )
+        fg_item = sorted_by_growth[0] if sorted_by_growth else md_item
+
+        fastest_growing = None
+        if fg_item:
+            fastest_growing = {
+                "topic": fg_item["topic"],
+                "topic_slug": fg_item["topic_slug"],
+                "mentions": fg_item["current_weekly_mentions"],
+                "growth_pct": fg_item["growth_pct"],
+                "is_new": fg_item.get("is_new", False),
+                "status_chip": fg_item["status_chip"],
+                "calculation_popover": (
+                    f"Newly emerging in current 7 days with {fg_item['current_weekly_mentions']} mentions."
+                    if fg_item.get("is_new")
+                    else f"Calculated as a {fg_item['growth_pct']}% shift from {fg_item['prev_weekly_mentions']} to {fg_item['current_weekly_mentions']} mentions over the last 7 days."
+                ),
+                "proof_items": fg_item["proof_items"],
+                "programmes": fg_item["matching_programmes"],
+            }
+
+        # 3. Biggest Expected Rise: Holt-Winters model on REAL daily counts (>= 21 real days required)
+        # If any topic has >= 21 real days, fit forecast and find highest % increase
+        biggest_rise = None
+        best_forecast_topic = None
+        best_forecast_pct = -999.0
+        best_forecast_item = None
+
+        for item in summary:
+            if item.get("real_days_count", 0) >= 21:
+                series = self.get_topic_series(item["topic"], days=90)
+                real_series = [o for o in series if not o.is_simulated]
+                if len(real_series) >= 21:
+                    dates = [o.date for o in real_series]
+                    values = [float(o.mentions) for o in real_series]
+                    fc_res = forecaster.fit_and_forecast(
+                        topic=item["topic"],
+                        dates=dates,
+                        values=values,
+                        horizon=30,
+                        target_model="best",
+                        real_days_count=len(real_series),
+                    )
+                    if fc_res.get("status") == "trained" and fc_res.get("forecast_points"):
+                        pred_end = fc_res["forecast_points"][-1]["predicted"]
+                        actual_now = values[-1] if values else 1.0
+                        fc_growth = round(((pred_end - actual_now) / max(1.0, actual_now)) * 100, 1)
+                        if fc_growth > best_forecast_pct:
+                            best_forecast_pct = fc_growth
+                            best_forecast_topic = item["topic"]
+                            best_forecast_item = item
+
+        if best_forecast_topic and best_forecast_item:
+            biggest_rise = {
+                "has_leader": True,
+                "topic": best_forecast_item["topic"],
+                "topic_slug": best_forecast_item["topic_slug"],
+                "forecast_growth_pct": best_forecast_pct,
+                "status_chip": "Growing" if best_forecast_pct > 3.0 else ("Cooling" if best_forecast_pct < -3.0 else "Steady"),
+                "calculation_popover": f"Projected {best_forecast_pct}% change over next 30 days using Holt-Winters exponential smoothing on {best_forecast_item.get('real_days_count')} recorded days.",
+                "proof_items": best_forecast_item["proof_items"],
+                "programmes": best_forecast_item["matching_programmes"],
+            }
+        else:
+            # Under 21 real days: explicit 'Building history' state and card should be hidden
+            biggest_rise = {
+                "has_leader": False,
+                "topic": None,
+                "status": "building_history",
+                "notes": "Building history: requires at least 21 real days of recorded data to train Holt-Winters ETS.",
+            }
+
+        return {
+            "most_discussed": most_discussed,
+            "fastest_growing": fastest_growing,
+            "biggest_rise": biggest_rise,
+        }
+
 
     def update_health(self, source: str, status: str, records_added: int, note: str, quota_info: Optional[str] = None):
         self.sources_health[source] = SourceHealth(

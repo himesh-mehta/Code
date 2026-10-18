@@ -287,3 +287,80 @@ export const SAMPLE_BEST_TIME_TO_POST = [
 export const SAMPLE_LEARNER_QUOTES = SAMPLE_LEARNER_VOICES;
 export const SAMPLE_PAST_REPORTS = SAMPLE_REPORTS;
 
+export const SAMPLE_TRENDS_CARDS = {
+  most_discussed: {
+    topic: "Green Energy & Solar Tech",
+    topic_slug: "solar-and-green-energy",
+    mentions: 14280,
+    growth_pct: 12.4,
+    status_chip: "Steady" as const,
+    calculation_popover: "Sample baseline: 14,280 verified learner & mentor mentions.",
+    programmes: ["Renewable Infrastructure Track"],
+    proof_items: [
+      {
+        id: "sample_proof_solar_1",
+        title: "PM Surya Ghar rooftop solar technician certification and practical installation guide",
+        source: "youtube",
+        author: "@SolarTechnicianIndia",
+        published_at: "2024-10-14",
+        url: "https://tatastrive.com/courses",
+      },
+      {
+        id: "sample_proof_solar_2",
+        title: "National rooftop scheme subsidies drive surging queries on installer certifications",
+        source: "google_news",
+        author: "Economic Times",
+        published_at: "2024-10-15",
+        url: "https://tatastrive.com",
+      }
+    ]
+  },
+  fastest_growing: {
+    topic: "Generative AI for Office Productivity",
+    topic_slug: "ai-and-digital-skills",
+    mentions: 5120,
+    growth_pct: 42.0,
+    is_new: false,
+    status_chip: "Growing" as const,
+    calculation_popover: "Sample baseline: +42% spike across skill forums this week.",
+    programmes: ["Digital Workplace Program"],
+    proof_items: [
+      {
+        id: "sample_proof_ai_1",
+        title: "Practical prompt engineering tools for non-technical office administrators",
+        source: "youtube",
+        author: "@TechSkilling",
+        published_at: "2024-10-16",
+        url: "https://tatastrive.com/courses",
+      }
+    ]
+  },
+  biggest_rise: {
+    has_leader: true,
+    topic: "Electric Vehicle Fleet Maintenance",
+    topic_slug: "ev-and-battery",
+    forecast_growth_pct: 54.0,
+    status_chip: "Growing" as const,
+    calculation_popover: "Sample baseline: +54% anticipated over the next 30 days.",
+    programmes: ["Automotive Modernization"],
+    proof_items: [
+      {
+        id: "sample_proof_ev_1",
+        title: "High voltage battery safety diagnostics and charging station maintenance labs",
+        source: "youtube",
+        author: "@EVTrainingHub",
+        published_at: "2024-10-15",
+        url: "https://tatastrive.com/courses",
+      }
+    ]
+  }
+};
+
+export const SAMPLE_EARLY_SIGNALS = [
+  { topic: "Drone technology & remote pilot training", category: "Agri-Tech & Logistics", growth_pct: 38.0 },
+  { topic: "Tele-Health GDA & bedside nursing", category: "Community Healthcare", growth_pct: 29.0 },
+  { topic: "Industrial IoT & PLC automation", category: "Advanced Manufacturing", growth_pct: 22.0 },
+  { topic: "Green hydrogen & clean tech technician", category: "Renewable Energy", growth_pct: 19.0 },
+];
+
+

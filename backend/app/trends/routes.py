@@ -8,13 +8,45 @@ from .taxonomy import TOPIC_CATEGORIES
 router = APIRouter(prefix="/api/trends", tags=["Trend Intelligence & Forecasting"])
 
 @router.get("/overview")
-def get_trends_overview():
-    """Returns current topic rankings, momentum, sentiment, and source breakdown."""
+async def get_trends_overview():
+    """Returns current topic rankings, top cards (Most Discussed, Fastest Growing, Biggest Expected Rise), narration, and source breakdown."""
+    from ..db import get_total_posts_count
+    from .collector import get_source_availability_summary
+    from .narration import generate_trend_narration
+
     summary = trend_storage.get_all_topics_current_summary()
+    top_cards = trend_storage.get_top_insight_cards(summary)
+
+    # Prepare payload for grounded Groq narration
+    narration_payload = {
+        "most_discussed": top_cards.get("most_discussed"),
+        "fastest_growing": top_cards.get("fastest_growing"),
+        "biggest_rise": top_cards.get("biggest_rise"),
+        "top_topics": [
+            {
+                "topic": t["topic"],
+                "mentions": t["current_weekly_mentions"],
+                "growth_pct": t["growth_pct"],
+                "status_chip": t["status_chip"],
+                "programmes": t["matching_programmes"],
+            }
+            for t in summary[:5]
+        ]
+    }
+    narration = await generate_trend_narration(narration_payload)
+    sources_summary = get_source_availability_summary()
+    total_posts = get_total_posts_count()
+
     return {
         "status": "success",
         "total_topics": len(summary),
         "topics": summary,
+        "top_cards": top_cards,
+        "narration": narration,
+        "page_summary": narration.get("page_summary", ""),
+        "sources_summary": sources_summary,
+        "is_sample_fallback": (total_posts < 30),
+        "total_real_posts": total_posts,
         "taxonomy": TOPIC_CATEGORIES,
     }
 
@@ -43,12 +75,13 @@ def get_topic_forecast(
 ):
     """
     Generates a numerical machine learning forecast with 80% and 95% prediction intervals
-    using Holt-Winters Exponential Smoothing or Seasonal-Naive baseline.
+    using Holt-Winters Exponential Smoothing. Strictly requires at least 21 real days of recorded data.
     """
     series = trend_storage.get_topic_series(topic, days=90)
     if not series:
         raise HTTPException(status_code=404, detail=f"Topic '{topic}' not found in trend storage.")
 
+    real_days = sum(1 for s in series if not s.is_simulated)
     dates = [s.date for s in series]
     values = [float(s.mentions) for s in series]
 
@@ -58,9 +91,11 @@ def get_topic_forecast(
         values=values,
         horizon=horizon,
         target_model=model,
+        real_days_count=real_days,
     )
 
     return forecast_res
+
 
 @router.get("/detail")
 def get_topic_detail_endpoint(

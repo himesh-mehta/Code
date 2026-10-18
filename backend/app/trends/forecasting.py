@@ -46,7 +46,8 @@ class TrendForecaster:
         n = len(values)
 
         # Enforce minimum 21 real days guardrail: show 'Building history' and NO fake forecast
-        if real_days_count is not None and real_days_count < 21:
+        actual_real_days = real_days_count if real_days_count is not None else n
+        if actual_real_days < 21 or n < 21:
             return {
                 "topic": topic,
                 "target_metric": "daily_mentions",
@@ -63,48 +64,11 @@ class TrendForecaster:
                     "relative_improvement_pct": 0.0,
                 },
                 "status": "building_history",
-                "real_days_count": real_days_count,
+                "real_days_count": actual_real_days,
                 "min_required_days": 21,
-                "notes": f"Building history: {real_days_count}/21 real days accumulated. Machine learning forecast will activate automatically once 21 real days are recorded.",
+                "notes": f"Building history: {actual_real_days}/21 real days accumulated. Machine learning forecast will activate automatically once 21 real days are recorded.",
                 "historical_points": [{"date": d, "actual": v} for d, v in zip(dates, values)],
                 "forecast_points": [],
-            }
-
-        if n < 14:
-            # Insufficient history guardrail
-            avg_val = np.mean(values) if n > 0 else 5.0
-            last_date = datetime.strptime(dates[-1], "%Y-%m-%d") if dates else datetime.now(timezone.utc)
-            forecast_points = []
-            for h in range(1, horizon + 1):
-                f_date = (last_date + timedelta(days=h)).strftime("%Y-%m-%d")
-                forecast_points.append({
-                    "date": f_date,
-                    "predicted": round(float(avg_val), 1),
-                    "lower_80": max(0.0, round(float(avg_val * 0.7), 1)),
-                    "upper_80": round(float(avg_val * 1.3), 1),
-                    "lower_95": max(0.0, round(float(avg_val * 0.5), 1)),
-                    "upper_95": round(float(avg_val * 1.5), 1),
-                })
-
-            return {
-                "topic": topic,
-                "target_metric": "daily_mentions",
-                "horizon_days": horizon,
-                "model_name": "Simple Mean (Insufficient History)",
-                "model_version": self.version,
-                "training_cutoff_date": dates[-1] if dates else "unknown",
-                "forecast_generated_at": now_iso,
-                "evaluation": {
-                    "mae": 0.0,
-                    "rmse": 0.0,
-                    "smape_pct": 0.0,
-                    "baseline_mae": 0.0,
-                    "relative_improvement_pct": 0.0,
-                },
-                "status": "insufficient_history",
-                "notes": f"Only {n} historical data points available. Minimum 14 points required for rigorous ML model fitting.",
-                "historical_points": [{"date": d, "actual": v} for d, v in zip(dates, values)],
-                "forecast_points": forecast_points,
             }
 
         # Sparsity check
