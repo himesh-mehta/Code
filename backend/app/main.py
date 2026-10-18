@@ -114,8 +114,12 @@ async def assistant_chat(req: ChatRequest):
 # Mount Trend Intelligence & ML Forecasting Router
 from .trends.routes import router as trends_router
 from .trends.scheduler import scheduler
+from .api_endpoints import router as single_source_router
+from .ai.routes import router as ai_router
 
 app.include_router(trends_router)
+app.include_router(single_source_router)
+app.include_router(ai_router)
 
 @app.on_event("startup")
 def on_startup():

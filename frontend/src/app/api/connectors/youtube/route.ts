@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 const DEFAULT_YOUTUBE_API_KEY =
   process.env.YOUTUBE_API_KEY ||
   process.env.NEXT_PUBLIC_YOUTUBE_API_KEY ||
-  "AIzaSyBrEppqTLIpnffQKaapzWOih9dzn7zdRRc";
+  "";
 
 // In-memory cache for ultra-fast response
 interface CacheEntry {
@@ -15,87 +15,6 @@ interface CacheEntry {
 }
 const youtubeCache = new Map<string, CacheEntry>();
 const YOUTUBE_CACHE_TTL_MS = 5 * 60 * 1000;
-
-const VERIFIED_YOUTUBE_FALLBACK_POSTS: Post[] = [
-  {
-    id: "yt_01",
-    platform: "youtube",
-    author_handle: "@TechSkillIndia",
-    content: "Is learning generative AI prompts useful for non-CS students? Most webinars don't give a realistic roadmap for B.Com or Arts freshers.",
-    posted_at: "2026-10-16T14:20:00Z",
-    likes: 342,
-    comments: 84,
-    topic: "Practical AI skills",
-    sentiment: "neutral",
-    is_question: true,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=OLzQ-kmxMrc",
-    video_id: "OLzQ-kmxMrc",
-    media_url: "https://img.youtube.com/vi/OLzQ-kmxMrc/hqdefault.jpg",
-    is_sample: false,
-  },
-  {
-    id: "yt_02",
-    platform: "youtube",
-    author_handle: "@CareerCoachRakesh",
-    content: "Tata STRIVE free vocational courses in solar PV installation and electric vehicle technician are producing 100% placement in Maharashtra.",
-    posted_at: "2026-10-15T11:00:00Z",
-    likes: 890,
-    comments: 112,
-    topic: "Vocational training access",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=_KMicBmQtSc",
-    video_id: "_KMicBmQtSc",
-    media_url: "https://img.youtube.com/vi/_KMicBmQtSc/hqdefault.jpg",
-    is_sample: false,
-  },
-  {
-    id: "yt_03",
-    platform: "youtube",
-    author_handle: "@fresher_ananya",
-    content: "I gave 3 campus interviews. Technical was clear, but got rejected in the HR discussion. How do I practice behavioral answers?",
-    posted_at: "2026-10-14T09:15:00Z",
-    likes: 215,
-    comments: 48,
-    topic: "Interview preparation",
-    sentiment: "negative",
-    is_question: true,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=9IUGBupxPnY",
-    video_id: "9IUGBupxPnY",
-    media_url: "https://img.youtube.com/vi/9IUGBupxPnY/hqdefault.jpg",
-    is_sample: false,
-  },
-  {
-    id: "yt_04",
-    platform: "youtube",
-    author_handle: "@YouthEmpowerIndia",
-    content: "Step by step guide to PMKVY 4.0 and Tata STRIVE hospitality & retail certification programs. Free courses with stipend support.",
-    posted_at: "2026-10-13T16:30:00Z",
-    likes: 560,
-    comments: 72,
-    topic: "Vocational training access",
-    sentiment: "positive",
-    is_question: false,
-    is_relevant: true,
-    url: "https://www.youtube.com/watch?v=ScMzIvxBSi4",
-    video_id: "ScMzIvxBSi4",
-    media_url: "https://img.youtube.com/vi/ScMzIvxBSi4/hqdefault.jpg",
-    is_sample: false,
-  },
-];
-
-function getVerifiedFallbackPosts(query: string): Post[] {
-  const qLower = query.toLowerCase();
-  const terms = qLower.split(/\s+/).filter(Boolean);
-  const matched = VERIFIED_YOUTUBE_FALLBACK_POSTS.filter((p) => {
-    const full = `${p.content} ${p.topic} ${p.author_handle}`.toLowerCase();
-    return terms.some((t) => full.includes(t)) || qLower.includes("skill") || qLower.includes("strive") || qLower.includes("tata");
-  });
-  return matched.length > 0 ? matched : VERIFIED_YOUTUBE_FALLBACK_POSTS;
-}
 
 function decodeHtmlEntities(str: string): string {
   return str
@@ -242,17 +161,21 @@ function classifyRelevance(title: string, desc: string, query: string): boolean 
   const q = query.toLowerCase();
 
   // Filter out Jeffrey Skilling (Enron) and Tom Skilling (weatherman) false positives
-  if (fullText.includes("jeffrey skilling") || fullText.includes("enron") || fullText.includes("tom skilling") || fullText.includes("weatherman")) {
+  if (
+    fullText.includes("jeffrey skilling") ||
+    fullText.includes("enron") ||
+    fullText.includes("tom skilling") ||
+    fullText.includes("weatherman")
+  ) {
     return false;
   }
 
-  // Filter out video game skilling (Runescape, OSRS, WoW, MMO)
+  // Filter out gaming keywords
   const gamingKeywords = ["osrs", "runescape", "ironman", "afk", "mmorpg", "pvp", "gameplay", "walkthrough", "speedrun"];
   if (gamingKeywords.some((g) => fullText.includes(g))) {
     return false;
   }
 
-  // Relevant employability / skilling / youth keywords
   const relevantKeywords = [
     "skill",
     "employability",
@@ -303,25 +226,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(cached.data);
   }
 
-  // If no API key is provided, instantly return verified video dispatches matching query
   if (!apiKey) {
-    const fallbackItems = getVerifiedFallbackPosts(q);
-    const fallbackResponse = {
-      items: fallbackItems,
-      cursor: null,
-      hits_total: fallbackItems.length,
-      total: fallbackItems.length,
-      relevant_count: fallbackItems.filter((p) => p.is_relevant).length,
-      query: q,
-      source: "youtube",
-      notice: "Serving verified YouTube skilling video dispatches.",
-    };
-    youtubeCache.set(cacheKey, { data: fallbackResponse, timestamp: Date.now() });
-    return NextResponse.json(fallbackResponse);
+    return NextResponse.json(
+      {
+        items: [],
+        total: 0,
+        hits_total: 0,
+        relevant_count: 0,
+        query: q,
+        source: "youtube",
+        error: "YOUTUBE_API_KEY is not configured. Please add YOUTUBE_API_KEY in .env.",
+      },
+      { status: 503 }
+    );
   }
 
   try {
-    // When searching for skilling, add contextual terms so YouTube prioritizes vocational/employability content
     let searchTerms = q;
     const lowerQ = q.toLowerCase();
     if (lowerQ === "skilling" || lowerQ === "skills") {
@@ -340,9 +260,8 @@ export async function GET(request: NextRequest) {
       searchUrl.searchParams.set("pageToken", cursor);
     }
 
-    // 2.2 second abort signal
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2200);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     let searchRes: Response;
     try {
@@ -354,39 +273,41 @@ export async function GET(request: NextRequest) {
       clearTimeout(timeoutId);
     }
 
-    if (searchRes.status === 403 || searchRes.status === 429 || !searchRes.ok) {
-      const fallbackItems = getVerifiedFallbackPosts(q);
-      const fallbackResponse = {
-        items: fallbackItems,
-        cursor: null,
-        hits_total: fallbackItems.length,
-        total: fallbackItems.length,
-        relevant_count: fallbackItems.filter((p) => p.is_relevant).length,
-        query: q,
-        source: "youtube",
-        notice: "YouTube upstream limit reached. Displaying verified video dispatches.",
-      };
-      youtubeCache.set(cacheKey, { data: fallbackResponse, timestamp: Date.now() });
-      return NextResponse.json(fallbackResponse);
+    if (!searchRes.ok) {
+      const errData = await searchRes.json().catch(() => ({}));
+      const errMsg = errData.error?.message || `YouTube API error (HTTP ${searchRes.status})`;
+      return NextResponse.json(
+        {
+          items: [],
+          total: 0,
+          hits_total: 0,
+          relevant_count: 0,
+          query: q,
+          source: "youtube",
+          error: errMsg,
+          error_code: searchRes.status,
+        },
+        { status: searchRes.status >= 500 ? 502 : searchRes.status }
+      );
     }
 
     const searchData = await searchRes.json();
     const rawItems: any[] = searchData.items || [];
 
     if (rawItems.length === 0) {
-      const fallbackItems = getVerifiedFallbackPosts(q);
       return NextResponse.json({
-        items: fallbackItems,
+        items: [],
         cursor: null,
-        hits_total: fallbackItems.length,
-        total: fallbackItems.length,
-        relevant_count: fallbackItems.filter((p) => p.is_relevant).length,
+        hits_total: 0,
+        total: 0,
+        relevant_count: 0,
         query: q,
         source: "youtube",
+        message: `No YouTube videos found matching "${q}".`,
       });
     }
 
-    // Fetch video statistics (likes, comments, views)
+    // Fetch genuine video statistics (likes, comments, views)
     const videoIds = rawItems.map((it: any) => it.id?.videoId).filter(Boolean);
     const statsMap: Record<string, { likes: number; comments: number; views: number }> = {};
 
@@ -409,7 +330,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Map into normalized Post model
+    // Map into normalized Post model with genuine metrics only
     const transformedPosts: Post[] = rawItems.map((it: any) => {
       const vidId = it.id?.videoId;
       const snippet = it.snippet || {};
@@ -432,15 +353,15 @@ export async function GET(request: NextRequest) {
         author_handle: `@${channel.replace(/\s+/g, "")}`,
         content: fullText,
         posted_at: snippet.publishedAt || new Date().toISOString(),
-        likes: stats.likes,
-        comments: stats.comments,
-        shares: undefined,
+        likes: stats.likes || undefined,
+        comments: stats.comments || undefined,
+        shares: undefined, // YouTube Data API v3 does not provide share counts
         topic: inferTopic(cleanTitle, cleanDesc, q),
         sentiment: inferSentiment(fullText),
         is_question: checkIfQuestion(cleanTitle) || checkIfQuestion(cleanDesc),
         is_relevant: isRelevant,
         url: `https://www.youtube.com/watch?v=${vidId}`,
-        is_sample: false, // Live verified YouTube API signal
+        is_sample: false,
         video_id: vidId || null,
         media_url: thumbnail,
       };
@@ -463,19 +384,17 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(finalResult);
   } catch (err: any) {
-    console.warn("YouTube live query timed out or failed, serving verified videos:", err);
-    const fallbackItems = getVerifiedFallbackPosts(q);
-    const fallbackResponse = {
-      items: fallbackItems,
-      cursor: null,
-      hits_total: fallbackItems.length,
-      total: fallbackItems.length,
-      relevant_count: fallbackItems.filter((p) => p.is_relevant).length,
-      query: q,
-      source: "youtube",
-      notice: "Serving verified YouTube video dispatches for instant responsiveness.",
-    };
-    youtubeCache.set(cacheKey, { data: fallbackResponse, timestamp: Date.now() });
-    return NextResponse.json(fallbackResponse);
+    return NextResponse.json(
+      {
+        items: [],
+        total: 0,
+        hits_total: 0,
+        relevant_count: 0,
+        query: q,
+        source: "youtube",
+        error: err.message || "YouTube search failed or timed out.",
+      },
+      { status: 504 }
+    );
   }
 }

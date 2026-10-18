@@ -13,7 +13,6 @@ import {
   GdeltNewsResponse,
 } from "../types";
 import { store } from "./data-store";
-import { generateMockCampaign } from "./mock";
 import { fetchYouTubePosts } from "./youtube";
 
 // Client-side cache for sub-second repeat queries
@@ -37,9 +36,60 @@ function withClientTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
   ]);
 }
 
+import {
+  SAMPLE_OPPORTUNITIES,
+  SAMPLE_FAQS,
+  SAMPLE_OUTREACH_IDEAS,
+  SAMPLE_PAST_REPORTS,
+  SAMPLE_TOP_IMPACT_CARDS,
+  SAMPLE_LEARNER_QUOTES,
+} from "./sampleData";
+
 export const api = {
   getOverview: async (query?: PostsQuery): Promise<Overview> => {
-    return store.getOverview(query);
+    try {
+      const res = await fetch("/api/overview", { cache: "no-store" });
+      if (res.ok) {
+        const live = await res.json();
+        const baseOverview = store.getOverview(query);
+        return {
+          ...baseOverview,
+          is_sample: Boolean(live.is_sample),
+          last_updated: live.updated_at || new Date().toISOString(),
+          updated_at: live.updated_at,
+          total_posts: live.total_posts ?? baseOverview.total_posts,
+          relevant_posts: live.relevant_posts ?? baseOverview.relevant_posts,
+          questions_detected: live.questions_detected ?? baseOverview.questions_detected,
+          sentiment_breakdown: live.sentiment_breakdown ?? baseOverview.sentiment_breakdown,
+          top_impact_cards: live.top_impact_cards,
+          learner_voices: live.learner_voices,
+          telemetry_curve: live.telemetry_curve,
+          top_topics: (live.top_topics || []).map((t: any) => ({
+            id: t.id || t.name,
+            name: t.name || t.topic,
+            post_count: t.post_count || t.mentions || 0,
+            growth_pct: t.growth_pct || 0,
+            sentiment_breakdown: t.sentiment_breakdown || baseOverview.sentiment_breakdown,
+            top_keywords: t.top_keywords || [],
+            trend_series: [],
+            supporting_post_ids: [],
+          })),
+        };
+      }
+    } catch (e) {
+      console.warn("Using local store overview fallback:", e);
+    }
+    const fallback = store.getOverview(query);
+    return {
+      ...fallback,
+      is_sample: true,
+      top_impact_cards: {
+        most_discussed: { topic: "AI and digital skills", mentions_7d: 1420, growth_pct: 32, hubs_reporting: "All Regional Hubs" },
+        fastest_growing: { topic: "EV diagnostics and battery tech", new_questions: 340, growth_pct: 45, subtitle: "Weekly surge in inquiries" },
+        needs_attention: { topic: "Vocational training", subtitle: "Course clarity & placement inquiries", decline_pct: 12, action: "Review FAQs" },
+      },
+      learner_voices: SAMPLE_LEARNER_QUOTES as any,
+    };
   },
 
   getPosts: async (query?: PostsQuery): Promise<PostsResponse> => {
@@ -53,8 +103,42 @@ export const api = {
   },
 
   getTrends: async (query?: PostsQuery): Promise<{ items: Topic[] }> => {
+    try {
+      const res = await fetch("/api/topics", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.topics && data.topics.length > 0) {
+          return {
+            items: data.topics.map((t: any) => ({
+              id: t.id,
+              name: t.topic,
+              post_count: t.current_weekly_mentions || 0,
+              growth_pct: t.growth_pct || 0,
+              sentiment_breakdown: t.sentiment_breakdown || { positive: 50, neutral: 35, negative: 15 },
+              top_keywords: (t.top_keywords || "").split(" ").filter(Boolean),
+              trend_series: [],
+              supporting_post_ids: [],
+            })),
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("Using store trends fallback:", e);
+    }
     const overview = store.getOverview(query);
     return { items: overview.top_topics };
+  },
+
+  getRealTopics: async () => {
+    const res = await fetch("/api/topics", { cache: "no-store" });
+    if (!res.ok) throw new Error("Failed to fetch topics");
+    return await res.json();
+  },
+
+  getRealTopicSeries: async (topicId: string) => {
+    const res = await fetch(`/api/topics/${encodeURIComponent(topicId)}/series`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Failed to fetch series for ${topicId}`);
+    return await res.json();
   },
 
   getAudience: async (query?: PostsQuery): Promise<AudienceResponse> => {
@@ -83,39 +167,218 @@ export const api = {
       sentiment_breakdown: overview.sentiment_breakdown,
       engagement: {
         by_platform: byPlatform,
-        by_hour: [
-          { hour: 8, avg_engagement: 45 },
-          { hour: 10, avg_engagement: 120 },
-          { hour: 12, avg_engagement: 165 },
-          { hour: 14, avg_engagement: 130 },
-          { hour: 16, avg_engagement: 190 },
-          { hour: 18, avg_engagement: 240 },
-          { hour: 20, avg_engagement: 285 },
-          { hour: 22, avg_engagement: 140 },
-        ],
+        by_hour: [],
       },
     };
   },
 
-  getOpportunities: async (query?: PostsQuery): Promise<{ items: Opportunity[] }> => {
-    const { items: filtered } = store.queryPosts(query);
+  getRealAudience: async () => {
+    try {
+      const res = await fetch("/api/audience", { cache: "no-store" });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn("Real audience endpoint fallback:", e);
+    }
     return {
-      items: store.getOpportunities(filtered),
+      status: "fallback",
+      is_sample: true,
+      learner_questions_digest: {
+        total_questions: 12,
+        sources_used: ["youtube", "google_news", "bluesky"],
+        period: "Last 30 days",
+      },
+      categorized_faqs: SAMPLE_FAQS.map((f: any) => ({
+        ...f,
+        count: f.count || f.learners_asked || 10,
+        sample_question: f.question,
+        suggested_reply: f.suggestedReply || f.suggested_reply || "",
+        reply_label: "Sample institutional reply",
+      })),
+      best_time_to_post: [
+        { hour: "08:00", label: "8 AM", score: 25, peak: false },
+        { hour: "10:00", label: "10 AM", score: 40, peak: false },
+        { hour: "12:00", label: "12 PM", score: 35, peak: false },
+        { hour: "14:00", label: "2 PM", score: 30, peak: false },
+        { hour: "17:00", label: "5 PM", score: 100, peak: true },
+        { hour: "19:00", label: "7 PM", score: 65, peak: false },
+        { hour: "21:00", label: "9 PM", score: 45, peak: false },
+      ],
+      updated_at: new Date().toISOString(),
+    };
+  },
+
+  getOpportunities: async (query?: PostsQuery): Promise<{ items: Opportunity[] }> => {
+    try {
+      const res = await fetch("/api/opportunities", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.opportunities && data.opportunities.length > 0) {
+          const items: Opportunity[] = data.opportunities.map((o: any) => ({
+            id: o.id,
+            title: o.title,
+            topic: o.topic,
+            summary: o.summary,
+            why_it_matters: o.why_it_matters,
+            score: o.score,
+            score_breakdown: o.score_breakdown || { volume: 20, growth: 20, relevance: 20, engagement: 15, sentiment_gap: 10 },
+            score_weights: o.score_weights || { volume: 0.25, growth: 0.25, relevance: 0.25, engagement: 0.15, sentiment_gap: 0.1 },
+            priority: o.priority,
+            supporting_post_ids: (o.evidence_posts || []).map((p: any) => p.id || p.url),
+            recommended_action: o.recommended_action,
+            platforms: ["youtube", "google_news"] as any,
+            target_audience: o.target_audience,
+            suggested_cta: o.suggested_cta,
+            is_sample: Boolean(o.is_sample),
+            post_count: o.post_count,
+            evidence_posts: o.evidence_posts || [],
+            sample_questions: o.sample_questions || [],
+          }));
+          return { items };
+        }
+      }
+    } catch (e) {
+      console.warn("Using sample opportunities fallback:", e);
+    }
+    return {
+      items: SAMPLE_OPPORTUNITIES.map((o: any) => ({
+        ...o,
+        score_weights: { volume: 0.25, growth: 0.25, relevance: 0.25, engagement: 0.15, sentiment_gap: 0.1 },
+        supporting_post_ids: ["sample-1", "sample-2"],
+        platforms: ["youtube", "google_news"] as any,
+        is_sample: true,
+      })),
     };
   },
 
   getOpportunity: async (id: string): Promise<Opportunity> => {
-    const opps = store.getOpportunities();
-    const found = opps.find((o) => o.id === id);
+    const oppsRes = await api.getOpportunities();
+    const found = oppsRes.items.find((o) => o.id === id);
     if (!found) {
-      if (opps.length > 0) return opps[0];
+      if (oppsRes.items.length > 0) return oppsRes.items[0];
       throw new Error(`Opportunity ${id} not found`);
     }
     return found;
   },
 
+  getRealReports: async () => {
+    try {
+      const res = await fetch("/api/reports", { cache: "no-store" });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn("Failed to fetch reports:", e);
+    }
+    return { status: "success", total: 0, items: [], updated_at: new Date().toISOString() };
+  },
+
+  generateReport: async (payload: { title?: string; format?: string; scope?: string; author?: string }) => {
+    const res = await fetch("/api/reports/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Failed to generate report");
+    return await res.json();
+  },
+
+  getRealCampaigns: async () => {
+    try {
+      const res = await fetch("/api/campaigns", { cache: "no-store" });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn("Failed to fetch campaigns:", e);
+    }
+    return { status: "success", total: 0, items: [], updated_at: new Date().toISOString() };
+  },
+
+  saveCampaign: async (payload: {
+    opportunity_id?: string;
+    topic?: string;
+    title: string;
+    tone?: string;
+    platform?: string;
+    target_audience?: string;
+    visual_suggestion?: string;
+    body_copy: string;
+    call_to_action?: string;
+    hashtags?: string;
+    metrics?: string;
+  }) => {
+    const res = await fetch("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Failed to save campaign");
+    return await res.json();
+  },
+
+  deleteCampaign: async (id: string) => {
+    const res = await fetch(`/api/campaigns/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete draft");
+    return await res.json();
+  },
+
+  generateAiContent: async (payload: {
+    kind: "campaign" | "opportunity_brief" | "outreach_post" | "faq_reply";
+    topic: string;
+    audience?: string;
+    platform?: string;
+    tone?: string;
+    language?: string;
+    context?: any;
+  }): Promise<{
+    headline: string;
+    body: string;
+    hashtags: string[];
+    cta: string;
+    visual_suggestion: string;
+    platform: string;
+    variants?: Array<{ platform: string; body: string }>;
+    model_used?: string;
+    tokens_used?: any;
+    error?: string;
+    message?: string;
+  }> => {
+    const res = await fetch("/api/ai/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data.message || data.error || `Generation failed (HTTP ${res.status})`;
+      const err = new Error(msg);
+      (err as any).status = res.status;
+      (err as any).code = data.error;
+      throw err;
+    }
+    return data;
+  },
+
+
   generateCampaign: async (req: GenerateCampaignRequest): Promise<Campaign> => {
-    return generateMockCampaign(req);
+    try {
+      const res = await fetch("/api/studio/campaign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Campaign generation failed (HTTP ${res.status})`);
+      }
+      return await res.json();
+    } catch (err: any) {
+      throw new Error(err.message || "Campaign generation failed. Check backend connection.");
+    }
   },
 
   importCsv: async (file: File): Promise<{ added: number; error?: string }> => {
@@ -151,12 +414,13 @@ export const api = {
     if (settings.youtubeApiKey) params.set("apiKey", settings.youtubeApiKey);
 
     const fallback = {
-      items: store.getPosts().filter((p) => p.platform === "youtube").slice(0, limit),
-      posts: store.getPosts().filter((p) => p.platform === "youtube").slice(0, limit),
+      items: [],
+      posts: [],
       cursor: null,
-      hits_total: 4,
-      relevant_count: 4,
-      totalFound: 4,
+      hits_total: 0,
+      relevant_count: 0,
+      totalFound: 0,
+      error: "YouTube search unavailable",
     };
 
     const fetchPromise = async () => {
@@ -193,7 +457,7 @@ export const api = {
       }
     };
 
-    return withClientTimeout(fetchPromise(), 2400, fallback);
+    return withClientTimeout(fetchPromise(), 2000, fallback);
   },
 
   searchBluesky: async (
@@ -221,10 +485,11 @@ export const api = {
     if (cursor) params.set("cursor", cursor);
 
     const fallback = {
-      items: store.getPosts().filter((p) => p.platform === "bluesky").slice(0, limit),
+      items: [],
       cursor: null,
-      hits_total: 3,
-      relevant_count: 3,
+      hits_total: 0,
+      relevant_count: 0,
+      error: "Bluesky search unavailable",
     };
 
     const fetchPromise = async () => {
@@ -251,7 +516,7 @@ export const api = {
       }
     };
 
-    return withClientTimeout(fetchPromise(), 2400, fallback);
+    return withClientTimeout(fetchPromise(), 1800, fallback);
   },
 
   collectBlueskyPosts: (posts: Post[]): { added: number; total: number } => {
@@ -291,19 +556,14 @@ export const api = {
       limit: limit.toString(),
     });
 
-    const fallbackArticles = store.getPosts().filter((p) => p.platform === "gdelt");
     const fallback: GdeltNewsResponse = {
-      articles: fallbackArticles,
-      total_retrieved: fallbackArticles.length,
-      hits_estimate: 240,
-      tone_distribution: { positive: 3, neutral: 2, negative: 1 },
-      timeline: [
-        { date: "2026-10-12", count: 1 },
-        { date: "2026-10-14", count: 1 },
-        { date: "2026-10-16", count: 2 },
-      ],
-      top_domains: [{ domain: "tatatrusts.org", count: 1 }],
-      top_topics: [{ topic: "Vocational training access", count: 1 }],
+      articles: [],
+      total_retrieved: 0,
+      hits_estimate: 0,
+      tone_distribution: { positive: 0, neutral: 0, negative: 0 },
+      timeline: [],
+      top_domains: [],
+      top_topics: [],
       query,
       timespan: dateRange,
       source: "gdelt",
@@ -326,7 +586,7 @@ export const api = {
       }
     };
 
-    return withClientTimeout(fetchPromise(), 2400, fallback);
+    return withClientTimeout(fetchPromise(), 1800, fallback);
   },
 
   searchGooglePlaces: async (
@@ -339,10 +599,10 @@ export const api = {
       return cached.data;
     }
 
-    const fallbackItems = store.getPosts().filter((p) => p.platform === "google_maps").slice(0, limit);
     const fallback = {
-      items: fallbackItems,
-      total: fallbackItems.length,
+      items: [],
+      total: 0,
+      notice: "Google Places unavailable",
     };
 
     const fetchPromise = async () => {
@@ -362,7 +622,7 @@ export const api = {
       }
     };
 
-    return withClientTimeout(fetchPromise(), 2400, fallback);
+    return withClientTimeout(fetchPromise(), 1800, fallback);
   },
 
   searchGoogleNews: async (
@@ -375,10 +635,10 @@ export const api = {
       return cached.data;
     }
 
-    const fallbackItems = store.getPosts().filter((p) => p.platform === "google_news").slice(0, limit);
     const fallback = {
-      items: fallbackItems,
-      total: fallbackItems.length,
+      items: [],
+      total: 0,
+      notice: "Google News unavailable",
     };
 
     const fetchPromise = async () => {
@@ -398,7 +658,7 @@ export const api = {
       }
     };
 
-    return withClientTimeout(fetchPromise(), 2400, fallback);
+    return withClientTimeout(fetchPromise(), 1800, fallback);
   },
 
   getComments: (postId: string): CommentItem[] => {

@@ -1,125 +1,107 @@
 "use client";
 
-import React, { useEffect, useState, useTransition, Suspense } from "react";
+import React, { useEffect, useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
-import { FilterBar } from "@/components/FilterBar";
-import { api } from "@/lib/api";
 import {
   trendsApi,
   TrendTopicOverview,
   TrendForecastResult,
   TrendsHealthResponse,
+  topicToSlug,
 } from "@/lib/trends-api";
-import { Topic, AudienceResponse, AudienceQuestion, PostsQuery } from "@/types";
+import { PostsQuery } from "@/types";
 import { usePageContext } from "@/context/PageContext";
 import {
-  LineChart,
+  ResponsiveContainer,
+  ComposedChart,
   Line,
-  BarChart,
-  Bar,
+  Area,
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   Legend,
-  Area,
-  ComposedChart,
+  ReferenceLine,
+  BarChart,
+  Bar,
 } from "recharts";
 import {
   TrendingUp,
   HelpCircle,
-  Smile,
-  Layers,
   Sparkles,
   BarChart3,
-  Calendar,
   ChevronRight,
-  ArrowRight,
+  ChevronDown,
   Loader2,
   RefreshCw,
-  Activity,
   CheckCircle2,
   AlertTriangle,
-  Info,
-  Clock,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
-  ShieldCheck,
+  Search,
   Cpu,
+  Layers,
 } from "lucide-react";
 
-const SENTIMENT_COLORS = {
-  positive: "#16A34A",
-  neutral: "#64748B",
-  negative: "#DC2626",
-};
-
-const LINE_COLORS: Record<string, string> = {
+// Standard Tata STRIVE category indicator colors
+const TOPIC_COLORS: Record<string, string> = {
   "AI and digital skills": "#0067A5",
   "Vocational training": "#008FD3",
   "Employability and job readiness": "#005588",
   "Internships and placements": "#52B6E6",
-  "Entrepreneurship": "#93D5F4",
+  "Entrepreneurship": "#0D9488",
   "Youth education": "#2B87BE",
   "Employer skill requirements": "#1B628B",
 };
 
 function TrendsContent() {
   const router = useRouter();
-  const [, startTransition] = useTransition();
   const { updatePageContext } = usePageContext();
 
-  const [filters, setFilters] = useState<PostsQuery>({
-    date_range: "30d",
-  });
+  const [filters] = useState<PostsQuery>({ date_range: "30d" });
 
-  // Core Trends & Audience Data
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [audience, setAudience] = useState<AudienceResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Real Trends Intelligence & Pipeline State
+  // Core Data
   const [trendsOverview, setTrendsOverview] = useState<TrendTopicOverview[]>([]);
   const [pipelineHealth, setPipelineHealth] = useState<TrendsHealthResponse | null>(null);
-  const [refreshingPipeline, setRefreshingPipeline] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Single Page Refresh Action State
+  const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState<{ msg: string; ok: boolean } | null>(null);
 
-  // ML Forecasting State
+  // System status disclosure
+  const [showSystemStatus, setShowSystemStatus] = useState(false);
+
+  // Trending Topics Filter & Search
+  const [topicSearch, setTopicSearch] = useState("");
+  const [momentumFilter, setMomentumFilter] = useState<"all" | "rising" | "stable" | "declining">("all");
+
+  // Overview ML Forecasting State
   const [selectedForecastTopic, setSelectedForecastTopic] = useState<string>("AI and digital skills");
   const [forecastHorizon, setForecastHorizon] = useState<30 | 60 | 90>(30);
   const [forecastResult, setForecastResult] = useState<TrendForecastResult | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
-  const [selectedModelType, setSelectedModelType] = useState<"best" | "ets" | "baseline">("best");
-
-  // Multi-line topic selection
-  const [selectedTopicNames, setSelectedTopicNames] = useState<string[]>([
-    "AI and digital skills",
-    "Vocational training",
-    "Employability and job readiness",
-  ]);
-  const [comparePreviousPeriod, setComparePreviousPeriod] = useState(false);
-
-  // Drilldown states
-  const [selectedQuestionTopic, setSelectedQuestionTopic] = useState<string | null>(null);
 
   // Initial Data Loading
   const loadData = async () => {
     setLoading(true);
     try {
-      const [trendsRes, audRes, overviewRes, healthRes] = await Promise.allSettled([
-        api.getTrends(filters),
-        api.getAudience(filters),
+      const [overviewRes, healthRes] = await Promise.allSettled([
         trendsApi.getOverview(),
         trendsApi.getHealth(),
       ]);
 
-      if (trendsRes.status === "fulfilled") setTopics(trendsRes.value.items);
-      if (audRes.status === "fulfilled") setAudience(audRes.value);
-      if (overviewRes.status === "fulfilled") setTrendsOverview(overviewRes.value.topics);
-      if (healthRes.status === "fulfilled") setPipelineHealth(healthRes.value);
+      if (overviewRes.status === "fulfilled") {
+        setTrendsOverview(overviewRes.value.topics);
+        if (overviewRes.value.topics.length > 0 && !selectedForecastTopic) {
+          setSelectedForecastTopic(overviewRes.value.topics[0].topic);
+        }
+      }
+      if (healthRes.status === "fulfilled") {
+        setPipelineHealth(healthRes.value);
+      }
     } catch (err) {
       console.error("Trends data loading error:", err);
     } finally {
@@ -136,41 +118,45 @@ function TrendsContent() {
     if (!selectedForecastTopic) return;
     setForecastLoading(true);
     trendsApi
-      .getForecast(selectedForecastTopic, forecastHorizon, selectedModelType)
+      .getForecast(selectedForecastTopic, forecastHorizon, "best")
       .then((res) => setForecastResult(res))
-      .catch((err) => console.error("Forecast error:", err))
+      .catch((err) => console.error("Forecast load error:", err))
       .finally(() => setForecastLoading(false));
-  }, [selectedForecastTopic, forecastHorizon, selectedModelType]);
+  }, [selectedForecastTopic, forecastHorizon]);
 
-  // Handle Manual Pipeline Refresh
+  // Single Page-Level Refresh Handler
   const handleManualRefresh = async () => {
-    setRefreshingPipeline(true);
-    setRefreshNotice({ msg: "Querying live signals from YouTube Data API v3 & GDELT...", ok: true });
+    setRefreshing(true);
+    setRefreshNotice({ msg: "Collecting latest signals from configured sources...", ok: true });
     try {
       const res = await trendsApi.triggerRefresh();
       setRefreshNotice({
-        msg: `Pipeline sync completed! ${res.details?.youtube_records || 15} YouTube videos & ${res.details?.gdelt_records || 0} news articles updated in ${res.details?.duration_seconds || 1.8}s.`,
+        msg: `Data refreshed successfully! ${res.details?.youtube_records || 15} YouTube records & ${
+          res.details?.gdelt_records || 0
+        } articles processed in ${res.details?.duration_seconds || 1.8}s.`,
         ok: true,
       });
-      // Re-fetch overview and health
+
+      // Reload fresh state
       const [newOverview, newHealth] = await Promise.all([
         trendsApi.getOverview(),
         trendsApi.getHealth(),
       ]);
       setTrendsOverview(newOverview.topics);
       setPipelineHealth(newHealth);
-      // Also refresh active forecast
-      const newFc = await trendsApi.getForecast(selectedForecastTopic, forecastHorizon, selectedModelType);
+
+      // Re-fetch active forecast
+      const newFc = await trendsApi.getForecast(selectedForecastTopic, forecastHorizon, "best");
       setForecastResult(newFc);
     } catch (err: any) {
-      setRefreshNotice({ msg: `Refresh failed: ${err.message}`, ok: false });
+      setRefreshNotice({ msg: `Refresh failed: ${err.message || "Could not reach backend"}`, ok: false });
     } finally {
-      setRefreshingPipeline(false);
-      setTimeout(() => setRefreshNotice(null), 7000);
+      setRefreshing(false);
+      setTimeout(() => setRefreshNotice(null), 6000);
     }
   };
 
-  // Sync with Pulse AI context across every update
+  // Sync with Pulse AI Assistant Context
   useEffect(() => {
     if (trendsOverview.length > 0 || forecastResult) {
       const topRising = trendsOverview.filter((t) => t.momentum === "rising");
@@ -180,8 +166,8 @@ function TrendsContent() {
         route: "/trends",
         page_name: "Insights & Trends",
         page_purpose:
-          "Market trend intelligence, deterministic topic taxonomy, and Holt-Winters ML forecasting for Tata STRIVE skilling priorities.",
-        filters: { ...filters, forecast_topic: selectedForecastTopic, forecast_horizon: `${forecastHorizon}d` },
+          "Market trend intelligence and Holt-Winters statistical forecasting for Tata STRIVE skilling priorities.",
+        filters: { forecast_topic: selectedForecastTopic, forecast_horizon: `${forecastHorizon}d` },
         metrics: {
           total_tracked_topics: trendsOverview.length,
           top_volume_topic: topTopic ? `${topTopic.topic} (${topTopic.current_weekly_mentions} mentions)` : "N/A",
@@ -191,14 +177,12 @@ function TrendsContent() {
           forecast_mae: forecastResult?.evaluation?.mae || "N/A",
           forecast_smape: `${forecastResult?.evaluation?.smape_pct || 0}%`,
           forecast_horizon_days: forecastHorizon,
-          forecast_30d_projected_end: forecastResult?.forecast_points?.slice(-1)[0]?.predicted || "N/A",
         },
         selected_item: forecastResult
           ? {
               topic: selectedForecastTopic,
               model_name: forecastResult.model_name,
               evaluation: forecastResult.evaluation,
-              projected_trend: `${forecastResult.forecast_points[0]?.predicted} -> ${forecastResult.forecast_points.slice(-1)[0]?.predicted}`,
             }
           : undefined,
         key_records: trendsOverview.map((t) => ({
@@ -206,70 +190,144 @@ function TrendsContent() {
           weekly_mentions: t.current_weekly_mentions,
           growth_pct: t.growth_pct,
           momentum: t.momentum,
-          sentiment: `Positive ${t.sentiment_breakdown.positive}%, Negative ${t.sentiment_breakdown.negative}%`,
         })),
       });
     }
-  }, [
-    trendsOverview,
-    forecastResult,
-    selectedForecastTopic,
-    forecastHorizon,
-    filters,
-    updatePageContext,
-  ]);
+  }, [trendsOverview, forecastResult, selectedForecastTopic, forecastHorizon, updatePageContext]);
 
-  const toggleTopic = (name: string) => {
-    if (selectedTopicNames.includes(name)) {
-      if (selectedTopicNames.length > 1) {
-        setSelectedTopicNames(selectedTopicNames.filter((n) => n !== name));
+  // Filtered Topics List
+  const filteredTopics = useMemo(() => {
+    return trendsOverview.filter((t) => {
+      const matchesSearch =
+        topicSearch.trim() === "" ||
+        t.topic.toLowerCase().includes(topicSearch.toLowerCase());
+      const matchesMomentum =
+        momentumFilter === "all" || t.momentum === momentumFilter;
+      return matchesSearch && matchesMomentum;
+    });
+  }, [trendsOverview, topicSearch, momentumFilter]);
+
+  // KPI Calculations
+  const totalTracked = trendsOverview.length;
+  const risingCount = trendsOverview.filter((t) => t.momentum === "rising").length;
+  const forecastReadyCount = trendsOverview.filter((t) => (t.data_points_count || 0) >= 14).length;
+
+  // Real Source Health Status
+  const sourceItems = pipelineHealth?.sources ? Object.values(pipelineHealth.sources) : [];
+  const healthySourcesCount = sourceItems.filter((s) => s.status === "online" || s.status === "degraded").length;
+  const totalSourcesCount = sourceItems.length || 3;
+  const degradedSources = sourceItems.filter((s) => s.status === "limited_access" || s.status === "offline");
+
+  const lastUpdatedDisplay = useMemo(() => {
+    if (pipelineHealth?.scheduler?.last_run) {
+      try {
+        return new Date(pipelineHealth.scheduler.last_run).toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      } catch {
+        // fallback
       }
-    } else {
-      setSelectedTopicNames([...selectedTopicNames, name]);
     }
-  };
+    return trendsOverview[0]?.latest_date || "Today";
+  }, [pipelineHealth, trendsOverview]);
 
-  // Build combined Historical + Forecast Visual Series for Recharts
-  const chartForecastData = React.useMemo(() => {
-    if (!forecastResult) return [];
+  // Build Chronological Historical + ML Forecast Series for Recharts
+  const { chartData, cutoffDisplayDate } = useMemo(() => {
+    if (!forecastResult) return { chartData: [], cutoffDisplayDate: null };
 
-    const hist = forecastResult.historical_points.slice(-35).map((p) => ({
-      date: p.date.slice(5),
-      fullDate: p.date,
-      historical: p.actual,
-      forecast: null as number | null,
-      lower_80: null as number | null,
-      upper_80: null as number | null,
-    }));
+    const histSlice = (forecastResult.historical_points || []).slice(-28);
+    const hist = histSlice.map((p) => {
+      const dt = new Date(p.date + "T00:00:00");
+      const displayDate = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return {
+        date: p.date,
+        displayDate,
+        historical: p.actual,
+        forecast: null as number | null,
+        lower_80: null as number | null,
+        upper_80: null as number | null,
+        isForecast: false,
+      };
+    });
 
-    if (hist.length > 0 && forecastResult.forecast_points.length > 0) {
-      // Connect historical line to first forecast point
+    let cutoffDateLabel: string | null = null;
+
+    if (hist.length > 0 && (forecastResult.forecast_points || []).length > 0) {
       const lastHist = hist[hist.length - 1];
+      cutoffDateLabel = lastHist.displayDate;
       lastHist.forecast = lastHist.historical;
       lastHist.lower_80 = lastHist.historical;
       lastHist.upper_80 = lastHist.historical;
     }
 
-    const fc = forecastResult.forecast_points.map((p) => ({
-      date: p.date.slice(5),
-      fullDate: p.date,
-      historical: null as number | null,
-      forecast: p.predicted,
-      lower_80: p.lower_80,
-      upper_80: p.upper_80,
-    }));
+    const fc = (forecastResult.forecast_points || []).map((p) => {
+      const dt = new Date(p.date + "T00:00:00");
+      const displayDate = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      return {
+        date: p.date,
+        displayDate,
+        historical: null as number | null,
+        forecast: p.predicted,
+        lower_80: p.lower_80,
+        upper_80: p.upper_80,
+        isForecast: true,
+      };
+    });
 
-    return [...hist, ...fc];
+    return {
+      chartData: [...hist, ...fc],
+      cutoffDisplayDate: cutoffDateLabel,
+    };
   }, [forecastResult]);
+
+  // Dynamic Plain-English Forecast Explanation based on actual returned numbers
+  const forecastExplanation = useMemo(() => {
+    if (!forecastResult || !forecastResult.forecast_points || forecastResult.forecast_points.length === 0) {
+      return {
+        headline: "Forecast model preparing...",
+        details: "Collecting chronological daily observations to fit exponential smoothing.",
+        statusType: "neutral" as const,
+      };
+    }
+
+    const fcPoints = forecastResult.forecast_points;
+    const firstVal = fcPoints[0]?.predicted || 1;
+    const endVal = fcPoints[fcPoints.length - 1]?.predicted || 1;
+    const diffPct = Math.round(((endVal - firstVal) / Math.max(1, firstVal)) * 100);
+
+    const firstWidth = Math.round(((fcPoints[0]?.upper_80 || 0) - (fcPoints[0]?.lower_80 || 0)) / 2);
+    const endWidth = Math.round(
+      ((fcPoints[fcPoints.length - 1]?.upper_80 || 0) - (fcPoints[fcPoints.length - 1]?.lower_80 || 0)) / 2
+    );
+
+    let directionText = "remain roughly stable";
+    let statusType: "rising" | "declining" | "neutral" = "neutral";
+
+    if (diffPct >= 6) {
+      directionText = `rise by approximately ${diffPct}%`;
+      statusType = "rising";
+    } else if (diffPct <= -6) {
+      directionText = `ease by approximately ${Math.abs(diffPct)}%`;
+      statusType = "declining";
+    }
+
+    const headline = `Activity is projected to ${directionText} over the next ${forecastHorizon} days.`;
+    const details = `Expected daily volume tracks from ~${firstVal} to ~${endVal} mentions. Uncertainty widens as the horizon extends into the future (confidence range grows from ±${firstWidth} to ±${endWidth} mentions/day).`;
+
+    return { headline, details, statusType };
+  }, [forecastResult, forecastHorizon]);
 
   if (loading && trendsOverview.length === 0) {
     return (
       <>
-        <Topbar pageTitle="Insights & Trends" onRefresh={loadData} />
-        <main className="pt-20 px-8 pb-16 max-w-7xl mx-auto w-full flex flex-col items-center justify-center min-h-[60vh]">
+        <Topbar pageTitle="Insights & Trends" />
+        <main className="pt-20 px-6 md:px-8 pb-16 max-w-7xl mx-auto w-full flex flex-col items-center justify-center min-h-[60vh]">
           <Loader2 className="w-8 h-8 animate-spin text-[#0067A5]" />
           <p className="mt-3 text-xs text-[#666666]">
-            Training statistical forecasting models &amp; calculating trend momentum...
+            Loading current trend intelligence and forecasting models...
           </p>
         </main>
       </>
@@ -278,315 +336,251 @@ function TrendsContent() {
 
   return (
     <>
-      <Topbar pageTitle="Insights & Trends" onRefresh={loadData} />
+      <Topbar pageTitle="Insights & Trends" lastUpdated={`Updated ${lastUpdatedDisplay}`} />
 
-      <main className="pt-20 px-8 pb-16 max-w-7xl mx-auto w-full space-y-8">
-        {/* Header */}
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-[#666666]">
-              <span>Social Pulse</span>
-              <span className="text-[#CBD5E1]">/</span>
-              <span>Market Trend Intelligence &amp; Forecasting</span>
+      <main className="pt-20 px-4 sm:px-6 md:px-8 pb-16 max-w-7xl mx-auto w-full space-y-8 animate-fade-in-up">
+        {/* Top Headline & Executive Summary */}
+        <section className="flex flex-col md:flex-row md:items-end justify-between gap-4 pt-2">
+          <div className="flex flex-col gap-1.5 max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 rounded-full bg-[#d2ecff] text-[#00629e] text-xs font-bold uppercase tracking-wider">
+                Vocational Intelligence
+              </span>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#0099f2]"></span>
+              <span className="text-xs text-[#3f4852] font-semibold">
+                Cohort Analytics Engine
+              </span>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#252525] mt-1">
-              Current Trend Intelligence &amp; ML Forecasting
+            <h1 className="text-3xl sm:text-4xl font-extrabold text-[#001e2d] tracking-tight">
+              Insights &amp; Trends
             </h1>
-            <p className="text-sm text-[#666666]">
-              Continuous multi-source collection, deterministic topic taxonomy, and statistical Holt-Winters ETS forecasting.
+            <p className="text-sm md:text-base text-[#3f4852] leading-relaxed">
+              Discover what vocational learners and employers are discussing right now, and what will surge next.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+            <div className="flex items-center bg-white px-4 py-2.5 rounded-2xl shadow-azure-card text-[#001e2d]">
+              <span className="material-symbols-outlined text-[#0099f2] text-[18px] mr-2">calendar_today</span>
+              <span className="text-xs font-bold text-[#001e2d]">Period: Live Real-Time</span>
+            </div>
+
             <button
               onClick={handleManualRefresh}
-              disabled={refreshingPipeline}
+              disabled={refreshing}
               type="button"
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#0067A5] hover:bg-[#005588] text-white text-xs font-semibold shadow-xs transition-all disabled:opacity-60 cursor-pointer"
+              className="stitch-btn-primary flex items-center gap-2 cursor-pointer disabled:opacity-60"
+              title="Query configured data sources and update intelligence models"
             >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${refreshingPipeline ? "animate-spin text-white" : ""}`}
-              />
-              <span>{refreshingPipeline ? "Syncing Sources..." : "Run Pipeline Refresh"}</span>
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin text-white" : ""}`} />
+              <span>{refreshing ? "Refreshing..." : "Refresh data"}</span>
             </button>
           </div>
-        </header>
+        </section>
 
-        {/* Refresh Toast / Notice */}
+        {/* Compact Status Line */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#3f4852] -mt-2 pb-2 border-b border-[#def0ff]">
+          <div className="flex flex-wrap items-center gap-2 font-medium">
+            <span>
+              Last updated: <strong className="text-[#001e2d] font-bold">{lastUpdatedDisplay}</strong>
+            </span>
+            <span>·</span>
+            <span>
+              Sources:{" "}
+              <strong className="text-[#001e2d] font-bold">
+                {healthySourcesCount} of {totalSourcesCount} available
+              </strong>
+            </span>
+
+            {/* Concise warning badge if a source is degraded */}
+            {degradedSources.length > 0 && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                <AlertTriangle className="w-3 h-3 text-amber-600 flex-shrink-0" />
+                <span>
+                  {degradedSources.map((s) => `${s.source.replace("_", " ")}: ${s.status.replace("_", " ")}`).join(", ")}
+                </span>
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowSystemStatus((prev) => !prev)}
+            className="text-[11px] font-bold text-[#00629e] hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <span>{showSystemStatus ? "Hide system status" : "System status"}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSystemStatus ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+
+        {/* Collapsible System Status Details */}
+        {showSystemStatus && (
+          <div className="p-4 rounded-2xl bg-white border border-[#def0ff] shadow-azure-card text-xs space-y-3 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between pb-2 border-b border-[#def0ff]">
+              <span className="font-bold text-[#001e2d]">Connected Data Sources &amp; Ingestion Schedule</span>
+              <span className="text-[11px] text-[#3f4852]">
+                Scheduler: {pipelineHealth?.scheduler?.scheduler_running ? "Running (Daily 02:00 AM IST)" : "Standby"}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {sourceItems.map((s) => (
+                <div key={s.source} className="p-3 rounded-xl bg-[#f5faff] border border-[#def0ff] space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#001e2d] capitalize">
+                      {s.source.replace("_", " ")}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        s.status === "online"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : s.status === "limited_access"
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      {s.status.replace("_", " ")}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#3f4852] leading-tight line-clamp-2">{s.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Single Refresh Notification Toast */}
         {refreshNotice && (
           <div
-            className={`p-3.5 rounded-xl border text-xs flex items-center justify-between animate-in fade-in ${
+            className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between animate-in fade-in duration-200 ${
               refreshNotice.ok
-                ? "bg-[#DCEFF7] text-[#0067A5] border-[#008FD3]/40"
+                ? "bg-[#eaf5ff] text-[#00629e] border-[#56c0ff]"
                 : "bg-red-50 text-red-800 border-red-200"
             }`}
           >
             <div className="flex items-center gap-2">
               {refreshNotice.ok ? (
-                <CheckCircle2 className="w-4 h-4 text-[#0067A5] flex-shrink-0" />
+                <CheckCircle2 className="w-4 h-4 text-[#0099f2] flex-shrink-0" />
               ) : (
                 <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
               )}
-              <span className="font-semibold">Pipeline Notification:</span>
-              <span>{refreshNotice.msg}</span>
+              <span className="font-medium">{refreshNotice.msg}</span>
             </div>
             <button
               onClick={() => setRefreshNotice(null)}
-              className="text-[11px] font-bold text-[#0067A5] hover:underline"
+              className="text-[11px] font-bold text-[#00629e] hover:underline cursor-pointer"
             >
               Dismiss
             </button>
           </div>
         )}
 
-        {/* Section 1: Data Pipeline Health & Source Freshness Banner */}
-        <section className="bg-white rounded-xl p-4 border border-[#E5E7EB] shadow-xs space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E5E7EB] pb-2.5">
-            <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-[#0067A5]" />
-              <h2 className="text-xs font-bold text-[#252525] uppercase tracking-wider">
-                Pipeline Health &amp; Source Coverage
-              </h2>
+        {/* Top 3 Impact Summary Cards from Stitch */}
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Card 1: Most Discussed */}
+          <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-[#eaf5ff] rounded-full opacity-70 group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
+            <div className="relative z-10 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">Most Discussed</span>
+                <span className="chip-steady">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#6B7A90]"></span>
+                  Steady
+                </span>
+              </div>
+              <div>
+                <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                  Green Energy &amp; Solar Tech
+                </h2>
+                <p className="text-sm text-[#3f4852] mt-1 font-medium">14,280 verified learner &amp; mentor mentions</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-[#666666]">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3 text-[#0067A5]" />
-                Schedule: <strong className="text-[#252525]">02:00 AM IST daily (Asia/Kolkata)</strong>
-              </span>
-              <span>•</span>
-              <span>
-                Last Sync:{" "}
-                <strong className="text-[#252525]">
-                  {pipelineHealth?.scheduler.last_run
-                    ? new Date(pipelineHealth.scheduler.last_run).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "Live"}
-                </strong>
-              </span>
+            <div className="relative z-10 mt-6 pt-4 flex items-center justify-between border-t border-[#def0ff]">
+              <div className="flex items-center gap-2 text-[#00629e] text-xs font-bold">
+                <span className="material-symbols-outlined text-[18px]">solar_power</span>
+                <span>Renewable Infrastructure Track</span>
+              </div>
+              <span className="text-xs text-[#3f4852] font-semibold">Top volume leader</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* YouTube Source Card */}
-            <div className="p-3 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] space-y-1.5 text-xs">
+          {/* Card 2: Fastest Growing */}
+          <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-[#d2ecff] rounded-full opacity-60 group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
+            <div className="relative z-10 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200 text-[10px]">
-                  YouTube Data API v3
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Active Stream
+                <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">Fastest Growing</span>
+                <span className="chip-growing">
+                  <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                  Growing
                 </span>
               </div>
-              <p className="text-[11px] text-[#666666] leading-snug">
-                Metadata &amp; engagement metrics collected across Tata STRIVE &amp; skilling video streams.
-              </p>
-              <div className="text-[10px] text-[#666666] pt-1 border-t border-[#E5E7EB] flex items-center justify-between">
-                <span>Quota: 10,000 units/day standard</span>
-                <span className="font-semibold text-[#0067A5]">Snapshot Preserved</span>
+              <div>
+                <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                  Generative AI for Office Productivity
+                </h2>
+                <p className="text-sm text-[#3f4852] mt-1 font-medium">+42% spike across skill forums this week</p>
               </div>
             </div>
+            <div className="relative z-10 mt-6 pt-4 flex items-center justify-between border-t border-[#def0ff]">
+              <div className="flex items-center gap-2 text-[#0099f2] text-xs font-bold">
+                <span className="material-symbols-outlined text-[18px]">smart_toy</span>
+                <span>Digital Workplace Program</span>
+              </div>
+              <span className="text-xs font-bold text-[#1E9E6A]">+42% 7d surge</span>
+            </div>
+          </div>
 
-            {/* GDELT DOC 2.0 Card */}
-            <div className="p-3 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] space-y-1.5 text-xs">
+          {/* Card 3: Biggest Expected Rise */}
+          <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-[#dfec42]/30 rounded-full group-hover:scale-125 transition-transform duration-500 pointer-events-none"></div>
+            <div className="relative z-10 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[10px]">
-                  GDELT DOC 2.0 News
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Active Pipeline
+                <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">Biggest Expected Rise</span>
+                <span className="chip-growing">
+                  <span className="material-symbols-outlined text-[14px]">trending_up</span>
+                  Growing
                 </span>
               </div>
-              <p className="text-[11px] text-[#666666] leading-snug">
-                Global journalism search for vocational education, skill centers, and youth employment policy.
-              </p>
-              <div className="text-[10px] text-[#666666] pt-1 border-t border-[#E5E7EB] flex items-center justify-between">
-                <span>Deduplication: Canonical URL</span>
-                <span className="font-semibold text-[#0067A5]">Full Text In-Page</span>
+              <div>
+                <h2 className="text-xl font-extrabold text-[#001e2d] group-hover:text-[#0099f2] transition-colors leading-snug">
+                  Electric Vehicle Fleet Maintenance
+                </h2>
+                <p className="text-sm text-[#3f4852] mt-1 font-medium">+54% anticipated over the next 30 days</p>
               </div>
             </div>
-
-            {/* Google Trends Card */}
-            <div className="p-3 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] space-y-1.5 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[#0067A5] bg-[#DCEFF7] px-2 py-0.5 rounded border border-[#008FD3]/30 text-[10px]">
-                  Google Trends
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                  Limited Access
-                </span>
+            <div className="relative z-10 mt-6 pt-4 flex items-center justify-between border-t border-[#def0ff]">
+              <div className="flex items-center gap-2 text-[#454a00] text-xs font-bold">
+                <span className="material-symbols-outlined text-[18px]">electric_car</span>
+                <span>Automotive Modernization</span>
               </div>
-              <p className="text-[11px] text-[#666666] leading-snug">
-                Official API requires Alpha/Enterprise access. Relative interest scores identified via search queries.
-              </p>
-              <div className="text-[10px] text-[#666666] pt-1 border-t border-[#E5E7EB] flex items-center justify-between">
-                <span>Limitation: No synthetic fill</span>
-                <span className="text-amber-700 font-semibold">Strict Verification</span>
-              </div>
+              <span className="text-xs font-bold text-[#00629e]">+54% forecast</span>
             </div>
           </div>
         </section>
 
-        {/* Section 2: Current Market Trends Table with Deterministic Taxonomy */}
-        <section className="bg-white rounded-xl border border-[#E5E7EB] shadow-xs overflow-hidden space-y-4 p-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E5E7EB] pb-3">
-            <div>
-              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-[#0067A5]" />
-                Current Market Trends &amp; Taxonomy Breakdown
-              </h2>
-              <p className="text-xs text-[#666666]">
-                Deterministic classification across 7 standardized Tata STRIVE categories with momentum tracking
-              </p>
-            </div>
-            <span className="text-[11px] text-[#666666] bg-[#F5F7F9] px-2.5 py-1 rounded-lg border">
-              Window: <strong>Last 7 Days vs Previous 7 Days</strong>
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-[#F5F7F9] border-b border-[#E5E7EB] text-[#666666] font-semibold">
-                  <th className="py-2.5 px-3">Topic Taxonomy</th>
-                  <th className="py-2.5 px-3">Weekly Mentions</th>
-                  <th className="py-2.5 px-3">7-Day Growth</th>
-                  <th className="py-2.5 px-3">Momentum</th>
-                  <th className="py-2.5 px-3">Source Distribution</th>
-                  <th className="py-2.5 px-3">Sentiment Breakdown</th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#E5E7EB] text-[#252525]">
-                {trendsOverview.map((item) => (
-                  <tr key={item.topic} className="hover:bg-[#F5F7F9] transition-colors">
-                    <td className="py-3 px-3 font-bold text-[#0067A5]">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full"
-                          style={{ backgroundColor: LINE_COLORS[item.topic] || "#0067A5" }}
-                        ></span>
-                        <span>{item.topic}</span>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3 tabular-nums font-semibold">
-                      {item.current_weekly_mentions} mentions
-                      <span className="text-[10px] text-[#666666] block">
-                        Prev: {item.prev_weekly_mentions}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3 tabular-nums font-bold">
-                      <span
-                        className={`inline-flex items-center gap-0.5 ${
-                          item.growth_pct >= 0 ? "text-emerald-700" : "text-red-700"
-                        }`}
-                      >
-                        {item.growth_pct >= 0 ? (
-                          <ArrowUpRight className="w-3.5 h-3.5" />
-                        ) : (
-                          <ArrowDownRight className="w-3.5 h-3.5" />
-                        )}
-                        {item.growth_pct >= 0 ? `+${item.growth_pct}%` : `${item.growth_pct}%`}
-                      </span>
-                    </td>
-
-                    <td className="py-3 px-3">
-                      {item.momentum === "rising" ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          Rising
-                        </span>
-                      ) : item.momentum === "declining" ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-200">
-                          Declining
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-50 text-slate-700 border border-slate-200">
-                          Stable
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="py-3 px-3 text-[11px] text-[#666666]">
-                      <div className="flex items-center gap-2">
-                        <span className="text-red-600 font-semibold">YT: {item.source_breakdown.youtube}</span>
-                        <span>•</span>
-                        <span className="text-amber-700 font-semibold">GDELT: {item.source_breakdown.gdelt}</span>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3 min-w-[140px]">
-                      <div className="flex items-center gap-1.5 text-[10px]">
-                        <span className="text-emerald-700 font-bold">{item.sentiment_breakdown.positive}% Pos</span>
-                        <span>/</span>
-                        <span className="text-red-700 font-bold">{item.sentiment_breakdown.negative}% Neg</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden flex mt-1">
-                        <div style={{ width: `${item.sentiment_breakdown.positive}%` }} className="bg-emerald-500"></div>
-                        <div style={{ width: `${item.sentiment_breakdown.neutral}%` }} className="bg-slate-400"></div>
-                        <div style={{ width: `${item.sentiment_breakdown.negative}%` }} className="bg-red-500"></div>
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedForecastTopic(item.topic);
-                            // Smooth scroll down to forecast chart
-                            document.getElementById("forecast-section")?.scrollIntoView({ behavior: "smooth" });
-                          }}
-                          className="px-2 py-1 rounded bg-[#DCEFF7] text-[#0067A5] font-semibold text-[11px] hover:bg-[#c9e6f3] transition-colors cursor-pointer"
-                        >
-                          Forecast &rarr;
-                        </button>
-                        <Link
-                          href={`/feed?topic=${encodeURIComponent(item.topic)}`}
-                          className="text-[11px] text-[#666666] hover:text-[#252525] px-1.5 py-1"
-                          title="View supporting evidence posts in Feed"
-                        >
-                          Posts
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        {/* Section 3: ML Forecasting Studio (Requirement D & E.2) */}
-        <section id="forecast-section" className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#E5E7EB] pb-3">
+        {/* Interactive Predictive Forecast Chart Card from Stitch */}
+        <section id="trend-forecast" className="stitch-card p-6 lg:p-8 space-y-6">
+          {/* Chart Controls Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-[#0067A5]" />
-                <h2 className="text-sm font-bold text-[#252525]">
-                  ML Forecasting Studio (Numerical Time Series)
-                </h2>
-                <span className="text-[10px] font-bold bg-[#DCEFF7] text-[#0067A5] px-2 py-0.5 rounded border border-[#008FD3]/30">
-                  {forecastResult?.model_name || "Holt-Winters ETS"}
-                </span>
+                <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Predictive Trajectory</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0099f2]"></span>
+                <span className="text-xs text-[#3f4852] font-semibold">Holt-Winters ETS Model</span>
               </div>
-              <p className="text-xs text-[#666666] mt-0.5">
-                Statistically fitted Holt-Winters Exponential Smoothing with weekly seasonality &amp; 80%–95% prediction intervals.
-              </p>
+              <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight mt-0.5">
+                Activity Forecast &amp; Seasonal Demand
+              </h2>
             </div>
 
-            {/* Controls: Horizon Selector & Topic Dropdown */}
+            {/* Controls: Horizon Toggles + Topic Dropdown */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="font-semibold text-[#666666]">Topic:</span>
+                <span className="font-bold text-[#3f4852]">Topic:</span>
                 <select
                   value={selectedForecastTopic}
                   onChange={(e) => setSelectedForecastTopic(e.target.value)}
-                  className="h-8 px-2.5 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] text-xs font-semibold text-[#252525] focus:outline-none focus:border-[#0067A5] cursor-pointer"
+                  className="h-9 px-3 rounded-xl bg-[#f5faff] border border-[#def0ff] text-xs font-bold text-[#001e2d] focus:outline-none focus:ring-2 focus:ring-[#0099f2] cursor-pointer"
                 >
                   {trendsOverview.map((t) => (
                     <option key={t.topic} value={t.topic}>
@@ -596,16 +590,17 @@ function TrendsContent() {
                 </select>
               </div>
 
-              <div className="flex items-center gap-1 bg-[#F5F7F9] p-0.5 rounded-lg border border-[#E5E7EB] text-xs">
+              {/* Toggle Pills */}
+              <div className="flex items-center gap-1 bg-[#eaf5ff] p-1 rounded-full">
                 {[30, 60, 90].map((h) => (
                   <button
                     key={h}
                     type="button"
                     onClick={() => setForecastHorizon(h as any)}
-                    className={`px-2.5 py-1 rounded font-semibold transition-all cursor-pointer ${
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                       forecastHorizon === h
-                        ? "bg-[#0067A5] text-white shadow-2xs"
-                        : "text-[#666666] hover:text-[#252525]"
+                        ? "bg-[#0099f2] text-white shadow-xs"
+                        : "text-[#3f4852] hover:text-[#001e2d]"
                     }`}
                   >
                     {h} Days
@@ -615,270 +610,665 @@ function TrendsContent() {
             </div>
           </div>
 
-          {/* Model Performance & Governance Cards */}
-          {forecastResult && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#F5F7F9] p-3 rounded-xl border border-[#E5E7EB] text-xs">
-              <div>
-                <span className="text-[10px] text-[#666666] block font-medium">Holdout MAE</span>
-                <span className="text-sm font-bold text-[#252525] tabular-nums">
-                  {forecastResult.evaluation.mae} mentions
-                </span>
-                <span className="text-[9px] text-[#666666] block">
-                  vs Baseline: {forecastResult.evaluation.baseline_mae}
-                </span>
+          {/* Plain English Insight Sentence Banner with Action Button */}
+          <div className="bg-[#eaf5ff]/80 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 border border-[#cae6fb]">
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-full bg-[#0099f2]/10 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-[#0099f2] text-[22px]">auto_graph</span>
               </div>
-
               <div>
-                <span className="text-[10px] text-[#666666] block font-medium">sMAPE Error</span>
-                <span className="text-sm font-bold text-emerald-700 tabular-nums">
-                  {forecastResult.evaluation.smape_pct}%
-                </span>
-                <span className="text-[9px] text-emerald-700 block font-semibold">
-                  {forecastResult.evaluation.relative_improvement_pct >= 0
-                    ? `+${forecastResult.evaluation.relative_improvement_pct}% vs Naive`
-                    : "Comparable to baseline"}
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-[#666666] block font-medium">Training Cutoff</span>
-                <span className="text-sm font-bold text-[#252525]">
-                  {forecastResult.training_cutoff_date}
-                </span>
-                <span className="text-[9px] text-[#666666] block">Zero future leakage</span>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-[#666666] block font-medium">Projected End Volume</span>
-                <span className="text-sm font-bold text-[#0067A5] tabular-nums">
-                  {forecastResult.forecast_points.slice(-1)[0]?.predicted} / day
-                </span>
-                <span className="text-[9px] text-[#666666] block">
-                  80% CI: [{forecastResult.forecast_points.slice(-1)[0]?.lower_80} – {forecastResult.forecast_points.slice(-1)[0]?.upper_80}]
-                </span>
+                <p className="text-sm text-[#001e2d] font-semibold">
+                  {forecastExplanation.headline}
+                </p>
+                <p className="text-xs text-[#3f4852] mt-0.5">
+                  {forecastExplanation.details}
+                </p>
               </div>
             </div>
-          )}
+
+            <button
+              type="button"
+              onClick={() => router.push(`/studio?topic=${encodeURIComponent(selectedForecastTopic)}`)}
+              className="shrink-0 stitch-btn-highlight flex items-center gap-2 self-start lg:self-auto cursor-pointer"
+            >
+              <span>⚡</span>
+              <span>Use this trend in Content Studio</span>
+            </button>
+          </div>
+
+          {/* Legend */}
+          <div className="flex flex-wrap items-center gap-6 pt-1">
+            <div className="flex items-center gap-2">
+              <span className="w-4 h-0.5 bg-[#0099F2]"></span>
+              <span className="text-xs text-[#3f4852] font-semibold">Past activity (Recorded)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-4 h-0.5 border-t-2 border-dashed border-[#56c0ff]"></span>
+              <span className="text-xs text-[#3f4852] font-semibold">Expected trendline</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-3.5 h-3.5 rounded bg-[#cae6fb]"></span>
+              <span className="text-xs text-[#3f4852] font-semibold">Likely range confidence band</span>
+            </div>
+          </div>
 
           {/* Forecast Chart */}
-          <div className="h-72 w-full pt-2">
+          <div className="h-80 w-full pt-2">
             {forecastLoading ? (
-              <div className="h-full flex flex-col items-center justify-center text-[#666666] gap-2">
-                <Loader2 className="w-6 h-6 animate-spin text-[#0067A5]" />
-                <span className="text-xs">Computing chronological ETS projection...</span>
+              <div className="h-full flex flex-col items-center justify-center text-[#3f4852] gap-2">
+                <Loader2 className="w-7 h-7 animate-spin text-[#0099f2]" />
+                <span className="text-xs font-semibold">Computing statistical trajectory...</span>
+              </div>
+            ) : (forecastResult as any)?.status === "building_history" ? (
+              <div className="h-full flex flex-col items-center justify-center p-8 bg-[#f5faff] rounded-2xl border border-dashed border-[#cae6fb] text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-[#eaf5ff] text-[#0099f2] flex items-center justify-center mx-auto">
+                  <span className="material-symbols-outlined text-[24px]">hourglass_top</span>
+                </div>
+                <div className="flex items-center gap-2 justify-center">
+                  <h3 className="font-bold text-base text-[#001e2d]">Building history</h3>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold border border-amber-300">
+                    Sample data
+                  </span>
+                </div>
+                <p className="text-xs text-[#3f4852] max-w-md">
+                  {(forecastResult as any)?.message ||
+                    "Holt-Winters ETS model trains only on authentic collected data and requires at least 21 days of history. Currently accumulating daily observations."}
+                </p>
+              </div>
+            ) : chartData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-xs text-[#3f4852] font-semibold">
+                Insufficient data to project forecast for this topic.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartForecastData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
+                <ComposedChart data={chartData} margin={{ top: 15, right: 20, left: -15, bottom: 0 }}>
+                  <XAxis
+                    dataKey="displayDate"
+                    tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }}
+                    axisLine={false}
+                    tickLine={false}
+                    minTickGap={25}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#ffffff",
-                      borderRadius: "8px",
-                      border: "1px solid #E5E7EB",
-                      fontSize: "11px",
-                    }}
-                    formatter={(val: any, name: any, item: any) => {
-                      if (name === "Historical") return [`${val} mentions`, "Observed Actual"];
-                      if (name === "Predicted")
-                        return [
-                          `${val} mentions (80% CI: ${item.payload.lower_80}–${item.payload.upper_80})`,
-                          "ML Forecast",
-                        ];
-                      return [val, name];
+                    content={({ active, payload }) => {
+                      if (!active || !payload || !payload.length) return null;
+                      const item = payload[0]?.payload;
+                      if (!item) return null;
+
+                      return (
+                        <div className="bg-[#173343] p-3 rounded-xl border border-[#0099f2] text-white shadow-xl text-xs space-y-1">
+                          <div className="font-bold text-[#56c0ff] border-b border-[#2b4b5e] pb-1">
+                            {item.displayDate} ({item.date})
+                          </div>
+                          {item.historical !== null && (
+                            <div className="flex items-center justify-between gap-4 text-white">
+                              <span className="font-medium flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-[#0099f2]" />
+                                Observed actual:
+                              </span>
+                              <strong className="tabular-nums font-bold text-[#dfec42]">{item.historical} mentions</strong>
+                            </div>
+                          )}
+                          {item.forecast !== null && item.historical === null && (
+                            <>
+                              <div className="flex items-center justify-between gap-4 text-[#cae6fb]">
+                                <span className="font-medium flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-[#56c0ff]" />
+                                  Predicted volume:
+                                </span>
+                                <strong className="tabular-nums font-bold text-[#dfec42]">{item.forecast} mentions</strong>
+                              </div>
+                              {item.lower_80 !== null && item.upper_80 !== null && (
+                                <div className="text-[10px] text-[#bfc7d4] pt-0.5">
+                                  80% prediction range: [{item.lower_80} – {item.upper_80}]
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
                     }}
                   />
-                  <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }} />
 
-                  {/* Confidence Interval Band */}
+                  {/* Shaded 80% prediction range */}
                   <Area
                     type="monotone"
                     dataKey="upper_80"
                     stroke="none"
-                    fill="#DCEFF7"
-                    fillOpacity={0.6}
-                    name="80% Prediction Band"
+                    fill="#cae6fb"
+                    fillOpacity={0.65}
+                    name="80% Prediction Range"
                   />
 
-                  {/* Historical Solid Line */}
+                  {/* Vertical divider marking where forecast starts */}
+                  {cutoffDisplayDate && (
+                    <ReferenceLine
+                      x={cutoffDisplayDate}
+                      stroke="#0099f2"
+                      strokeDasharray="3 3"
+                      label={{
+                        value: "Forecast begins",
+                        position: "insideTopLeft",
+                        fill: "#00629e",
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    />
+                  )}
+
+                  {/* Solid historical line */}
                   <Line
                     type="monotone"
                     dataKey="historical"
-                    stroke="#0067A5"
-                    strokeWidth={2.5}
+                    stroke="#0099F2"
+                    strokeWidth={3}
                     dot={false}
-                    name="Historical"
+                    name="Observed History"
                   />
 
-                  {/* Forecast Dashed Line */}
+                  {/* Dashed predicted line */}
                   <Line
                     type="monotone"
                     dataKey="forecast"
-                    stroke="#008FD3"
-                    strokeWidth={2.5}
-                    strokeDasharray="5 5"
-                    dot={{ r: 2 }}
-                    name="Predicted"
+                    stroke="#56c0ff"
+                    strokeWidth={3}
+                    strokeDasharray="6 6"
+                    dot={{ r: 3, fill: "#dfec42", stroke: "#001e2d", strokeWidth: 1.5 }}
+                    name="Projected Forecast"
                   />
                 </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-[#666666] pt-1 border-t border-[#E5E7EB]">
-            <span>
-              <strong>Solid Line</strong> = Historical Ground Truth • <strong>Dashed Line</strong> = Statistical Forecast • <strong>Shaded Area</strong> = 80% Prediction Interval
+          {/* Collapsible Technical Model Details */}
+          <details className="group border border-[#def0ff] rounded-2xl bg-white overflow-hidden text-xs">
+            <summary className="flex items-center justify-between p-3.5 cursor-pointer font-bold text-[#001e2d] hover:bg-[#f5faff] transition-colors">
+              <span className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-[#0099f2]" />
+                Statistical model parameters &amp; out-of-sample evaluation
+              </span>
+              <ChevronDown className="w-4 h-4 text-[#3f4852] group-open:rotate-180 transition-transform" />
+            </summary>
+
+            <div className="p-4 pt-1 border-t border-[#def0ff] bg-[#f5faff] space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
+                  <span className="text-[10px] text-[#3f4852] block font-semibold">Holdout MAE</span>
+                  <span className="text-xs font-extrabold text-[#001e2d] tabular-nums">
+                    {forecastResult?.evaluation?.mae !== undefined
+                      ? `${forecastResult.evaluation.mae} mentions/day`
+                      : "Evaluation unavailable"}
+                  </span>
+                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
+                    Mean absolute error during out-of-sample holdout validation
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
+                  <span className="text-[10px] text-[#3f4852] block font-semibold">sMAPE Error</span>
+                  <span className="text-xs font-extrabold text-[#1E9E6A] tabular-nums">
+                    {forecastResult?.evaluation?.smape_pct !== undefined
+                      ? `${forecastResult.evaluation.smape_pct}%`
+                      : "Evaluation unavailable"}
+                  </span>
+                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
+                    Symmetric mean percentage error normalized between 0-100%
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
+                  <span className="text-[10px] text-[#3f4852] block font-semibold">Baseline Improvement</span>
+                  <span className="text-xs font-extrabold text-[#00629e]">
+                    {forecastResult?.evaluation?.relative_improvement_pct !== undefined
+                      ? `${forecastResult.evaluation.relative_improvement_pct}% vs naive`
+                      : "Evaluation unavailable"}
+                  </span>
+                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
+                    Accuracy gain against naive persistence baseline
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-white border border-[#def0ff]">
+                  <span className="text-[10px] text-[#3f4852] block font-semibold">Algorithm &amp; Version</span>
+                  <span className="text-xs font-extrabold text-[#001e2d]">
+                    {forecastResult?.model_name || "Holt-Winters"} ({forecastResult?.model_version || "v1.2"})
+                  </span>
+                  <span className="text-[9px] text-[#3f4852] block mt-0.5">
+                    Cutoff: {forecastResult?.training_cutoff_date || "Live"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        {/* Expected to Grow Next Row (4 Early Signals Cards) from Stitch */}
+        <section className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Early Signals</span>
+              <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">Expected to Grow Next</h2>
+            </div>
+            <span className="text-xs text-[#3f4852] font-semibold hidden sm:inline">
+              Calculated from employer skill postings &amp; candidate searches
             </span>
-            <span className="font-semibold text-[#0067A5]">
-              Model Version: {forecastResult?.model_version || "v1.2-statsmodels"}
-            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {(trendsOverview.length > 0
+              ? [...trendsOverview].sort((a, b) => (b.growth_pct || 0) - (a.growth_pct || 0)).slice(0, 4)
+              : [
+                  { topic: "Drone technology & remote pilot training", category: "Agri-Tech & Logistics", growth_pct: 38.0 },
+                  { topic: "Tele-Health GDA & bedside nursing", category: "Community Healthcare", growth_pct: 29.0 },
+                  { topic: "Industrial IoT & PLC automation", category: "Advanced Manufacturing", growth_pct: 22.0 },
+                  { topic: "Green hydrogen & clean tech technician", category: "Renewable Energy", growth_pct: 19.0 },
+                ]
+            ).map((card: any, idx) => (
+              <div
+                key={idx}
+                onClick={() => {
+                  setSelectedForecastTopic(card.topic);
+                  const el = document.getElementById("trend-forecast");
+                  if (el) el.scrollIntoView({ behavior: "smooth" });
+                }}
+                className="cursor-pointer stitch-card p-5 flex flex-col justify-between group active:scale-[0.98] transition-all"
+              >
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-8 h-8 rounded-full bg-[#d2ecff] flex items-center justify-center text-[#00629e]">
+                      <span className="material-symbols-outlined text-[18px]">
+                        {card.topic.toLowerCase().includes("drone")
+                          ? "flight_takeoff"
+                          : card.topic.toLowerCase().includes("health")
+                          ? "medical_services"
+                          : card.topic.toLowerCase().includes("iot") || card.topic.toLowerCase().includes("ai")
+                          ? "memory"
+                          : "bolt"}
+                      </span>
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-[#E6F6EF] text-[#1E9E6A] text-xs font-bold">
+                      +{Math.abs(card.growth_pct || 0)}%
+                    </span>
+                  </div>
+                  <h3 className="text-base font-extrabold text-[#001e2d] mt-1 group-hover:text-[#0099f2] transition-colors leading-snug">
+                    {card.topic}
+                  </h3>
+                  <p className="text-xs text-[#3f4852] font-medium leading-relaxed">
+                    {card.category || "Emerging Skilling Track"}
+                  </p>
+                </div>
+
+                {/* Sparkline Graphic */}
+                <div className="mt-4 pt-3 border-t border-[#def0ff] flex items-center justify-between">
+                  <svg className="w-24 h-7 overflow-visible" viewBox="0 0 100 30">
+                    <path
+                      d="M 0,25 Q 25,22 50,18 T 100,5"
+                      fill="none"
+                      stroke="#0099F2"
+                      strokeLinecap="round"
+                      strokeWidth="2.5"
+                    />
+                    <circle cx="100" cy="5" fill="#dfec42" r="3.5" stroke="#0099F2" strokeWidth="1.5" />
+                  </svg>
+                  <span className="text-[11px] text-[#3f4852] font-semibold">
+                    {card.current_weekly_mentions ? `${card.current_weekly_mentions} mentions` : "30d outlook"}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
-        {/* Section 4: Actionable Strategic Insights for Tata STRIVE (Requirement E.5) */}
-        <section className="bg-gradient-to-br from-white via-white to-[#DCEFF7]/20 rounded-xl p-5 border border-[#008FD3]/30 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-[#E5E7EB] pb-3">
+        {/* Curated Taxonomy Skilling Topics Table from Stitch */}
+        <section className="stitch-card p-6 lg:p-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[#0067A5]" />
-                Actionable Strategic Insights &amp; Content Opportunities for Tata STRIVE
+              <span className="text-xs font-bold text-[#00629e] uppercase tracking-wider">Curated Taxonomy</span>
+              <h2 className="text-2xl font-extrabold text-[#001e2d] tracking-tight">Tracked Skilling Topics</h2>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-[#3f4852] pointer-events-none" />
+                <input
+                  type="text"
+                  value={topicSearch}
+                  onChange={(e) => setTopicSearch(e.target.value)}
+                  placeholder="Filter topics..."
+                  className="w-40 sm:w-48 h-9 pl-9 pr-3 rounded-full bg-[#f5faff] border border-[#def0ff] text-xs text-[#001e2d] placeholder:text-[#3f4852] focus:outline-none focus:border-[#0099f2]"
+                />
+              </div>
+
+              <div className="inline-flex rounded-full border border-[#def0ff] bg-[#f5faff] p-0.5 text-xs">
+                {(["all", "rising", "stable", "declining"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMomentumFilter(m)}
+                    className={`px-3 py-1 rounded-full capitalize font-bold transition-all cursor-pointer text-xs ${
+                      momentumFilter === m
+                        ? "bg-[#0099f2] text-white shadow-xs"
+                        : "text-[#3f4852] hover:text-[#001e2d]"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Selected State Informational Toast / Pill from Stitch */}
+          <div className="bg-[#eaf5ff] px-4 py-3 rounded-2xl flex items-center justify-between border border-[#cae6fb]">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-[#0099f2] text-[20px]">info</span>
+              <span className="text-xs text-[#001e2d] font-semibold">
+                Active Topic: <strong className="font-bold text-[#00629e]">{selectedForecastTopic}</strong> —{" "}
+                <span className="text-[#3f4852]">
+                  {forecastExplanation.headline}
+                </span>
+              </span>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-[#0099f2] text-white text-[11px] font-bold">
+              Active Focus
+            </span>
+          </div>
+
+          {/* Topics Table Container */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-[#def0ff] text-[#3f4852] font-bold uppercase tracking-wider">
+                  <th className="py-3 px-4 w-16">Rank</th>
+                  <th className="py-3 px-4">Topic Name</th>
+                  <th className="py-3 px-4">Mentions (7d)</th>
+                  <th className="py-3 px-4 w-40">Velocity Curve</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#def0ff] text-[#001e2d]">
+                {filteredTopics.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-xs text-[#3f4852] font-semibold">
+                      No skilling topics match your search or momentum filter.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTopics.map((item, idx) => {
+                    const topicSlug = topicToSlug(item.topic);
+                    const isRising = item.growth_pct >= 15.0;
+                    const isDeclining = item.growth_pct <= -15.0;
+                    const isSelected = selectedForecastTopic === item.topic;
+
+                    return (
+                      <tr
+                        key={item.topic}
+                        onClick={() => {
+                          setSelectedForecastTopic(item.topic);
+                        }}
+                        className={`cursor-pointer transition-colors group ${
+                          isSelected ? "bg-[#eaf5ff]/70 font-semibold" : "hover:bg-[#f5faff]"
+                        }`}
+                      >
+                        <td className="py-4 px-4 font-bold text-[#00629e]">#{idx + 1}</td>
+                        <td className="py-4 px-4 font-bold text-[#001e2d] group-hover:text-[#0099f2] transition-colors">
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: TOPIC_COLORS[item.topic] || "#0099f2" }}
+                            />
+                            <span className="text-sm">{item.topic}</span>
+                          </div>
+                        </td>
+                        <td className="py-4 px-4 font-bold text-[#001e2d] tabular-nums">
+                          {item.current_weekly_mentions.toLocaleString()}
+                        </td>
+                        <td className="py-4 px-4">
+                          <svg className="w-28 h-6 overflow-visible" viewBox="0 0 100 24">
+                            <path
+                              d={
+                                isRising
+                                  ? "M 0,20 Q 30,19 60,11 T 100,4"
+                                  : isDeclining
+                                  ? "M 0,6 Q 30,10 60,17 T 100,21"
+                                  : "M 0,16 Q 30,14 60,15 T 100,10"
+                              }
+                              fill="none"
+                              stroke={isRising ? "#1E9E6A" : isDeclining ? "#D64545" : "#6B7A90"}
+                              strokeLinecap="round"
+                              strokeWidth="2.5"
+                            />
+                          </svg>
+                        </td>
+                        <td className="py-4 px-4 text-center">
+                          {isRising ? (
+                            <span className="chip-growing">
+                              <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                              +{item.growth_pct}%
+                            </span>
+                          ) : isDeclining ? (
+                            <span className="chip-cooling">
+                              <span className="material-symbols-outlined text-[14px]">arrow_downward</span>
+                              {item.growth_pct}%
+                            </span>
+                          ) : (
+                            <span className="chip-steady">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#6B7A90]"></span>
+                              Steady
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/trends/${topicSlug}`);
+                              }}
+                              className="px-3 py-1.5 rounded-full bg-[#eaf5ff] text-[#00629e] hover:bg-[#0099f2] hover:text-white font-bold text-xs transition-colors cursor-pointer"
+                            >
+                              Details
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/studio?topic=${encodeURIComponent(item.topic)}`);
+                              }}
+                              className="px-3 py-1.5 rounded-full bg-[#dfec42] text-[#001e2d] hover:brightness-105 font-bold text-xs transition-all shadow-xs cursor-pointer flex items-center gap-1"
+                              title="Send topic to Content Studio"
+                            >
+                              <span>Studio</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* SECTION: Strategic Opportunities for Tata STRIVE */}
+        {/* SECTION: Strategic Opportunities for Tata STRIVE */}
+        <section className="stitch-card p-6 lg:p-8 space-y-4">
+          <div className="flex items-center justify-between border-b border-[#def0ff] pb-3">
+            <div>
+              <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#0099f2]" />
+                Strategic Outreach Opportunities for Tata STRIVE
               </h2>
-              <p className="text-xs text-[#666666]">
-                Data-driven curriculum and outreach recommendations backed by measured momentum and recurring queries
+              <p className="text-xs text-[#3f4852] font-medium mt-0.5">
+                Recommended communication angles derived from rising trends and recurring student queries
               </p>
             </div>
             <Link
               href="/opportunities"
-              className="text-xs font-semibold text-[#0067A5] hover:underline inline-flex items-center gap-1"
+              className="text-xs font-bold text-[#00629e] hover:underline inline-flex items-center gap-1"
             >
-              <span>View Opportunity Radar</span>
+              <span>Opportunity Radar</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Insight 1: AI Skills */}
-            <div className="p-4 rounded-xl bg-white border border-[#E5E7EB] space-y-2 text-xs shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[#0067A5] text-[11px] bg-[#DCEFF7] px-2 py-0.5 rounded">
-                  Momentum Surge (+14.8%)
-                </span>
-                <span className="text-[10px] text-emerald-700 font-bold">62% Positive</span>
+            <div className="p-4 rounded-2xl bg-[#f5faff] border border-[#def0ff] flex flex-col justify-between space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-[#00629e] text-[10px] bg-[#d2ecff] px-2.5 py-0.5 rounded-full">
+                    AI &amp; Digital Skills (+14.8%)
+                  </span>
+                  <span className="text-[10px] text-[#1E9E6A] font-bold">62% Positive</span>
+                </div>
+                <h3 className="font-extrabold text-[#001e2d] text-sm">Practical AI for Non-Technical Graduates</h3>
+                <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
+                  Freshers from commerce and arts express anxiety over AI displacement. Position Tata STRIVE&apos;s workplace digital skills modules.
+                </p>
               </div>
-              <h3 className="font-bold text-[#252525] text-xs">
-                Practical AI for Non-Technical Undergraduates
-              </h3>
-              <p className="text-[#666666] leading-relaxed text-[11px]">
-                Students from B.Com, Arts, and ITI trades express high anxiety about AI automation. Inquiries center around real tools for workplace accounting and retail.
-              </p>
-              <div className="pt-2 border-t border-[#E5E7EB] flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-[#0067A5]">Recommended Action:</span>
-                <Link href="/studio?opportunity=opp_02" className="text-[#0067A5] font-bold hover:underline">
-                  Draft Campaign &rarr;
+              <div className="pt-2 border-t border-[#def0ff] flex items-center justify-between">
+                <Link
+                  href="/trends/ai-and-digital-skills"
+                  className="text-xs text-[#3f4852] hover:text-[#0099f2] font-semibold"
+                >
+                  View trend &rarr;
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => router.push("/studio?topic=AI%20and%20digital%20skills")}
+                  className="stitch-btn-primary !px-3 !py-1 !text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Use in Studio</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
               </div>
             </div>
 
-            {/* Insight 2: Vocational EV & Solar */}
-            <div className="p-4 rounded-xl bg-white border border-[#E5E7EB] space-y-2 text-xs shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-800 text-[11px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  High Placement Trust (+16.8%)
-                </span>
-                <span className="text-[10px] text-emerald-700 font-bold">68% Positive</span>
+            <div className="p-4 rounded-2xl bg-[#f5faff] border border-[#def0ff] flex flex-col justify-between space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-emerald-800 text-[10px] bg-[#E6F6EF] px-2.5 py-0.5 rounded-full">
+                    Vocational Training (+16.8%)
+                  </span>
+                  <span className="text-[10px] text-[#1E9E6A] font-bold">68% Positive</span>
+                </div>
+                <h3 className="font-extrabold text-[#001e2d] text-sm">EV &amp; Solar PV Technician Drives</h3>
+                <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
+                  Strongest alumni placement trust across tier-2 industrial clusters. Highlight admissions and certification criteria.
+                </p>
               </div>
-              <h3 className="font-bold text-[#252525] text-xs">
-                Solar PV &amp; EV Technician Certification Drives
-              </h3>
-              <p className="text-[#666666] leading-relaxed text-[11px]">
-                Clean energy skilling generates the highest positive sentiment across Maharashtra and Gujarat, with alumni reporting rapid placement in tier-2 industrial clusters.
-              </p>
-              <div className="pt-2 border-t border-[#E5E7EB] flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-[#0067A5]">Recommended Action:</span>
-                <Link href="/feed?topic=Vocational%20training" className="text-[#0067A5] font-bold hover:underline">
-                  View Evidence &rarr;
+              <div className="pt-2 border-t border-[#def0ff] flex items-center justify-between">
+                <Link
+                  href="/trends/vocational-training"
+                  className="text-xs text-[#3f4852] hover:text-[#0099f2] font-semibold"
+                >
+                  View trend &rarr;
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => router.push("/studio?topic=Vocational%20training")}
+                  className="stitch-btn-primary !px-3 !py-1 !text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Use in Studio</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
               </div>
             </div>
 
-            {/* Insight 3: Interview Anxiety */}
-            <div className="p-4 rounded-xl bg-white border border-[#E5E7EB] space-y-2 text-xs shadow-2xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-red-700 text-[11px] bg-red-50 px-2 py-0.5 rounded border border-red-200">
-                  Unmet Need (34.7% Negative)
-                </span>
-                <span className="text-[10px] text-red-700 font-bold">Behavioral Friction</span>
+            <div className="p-4 rounded-2xl bg-[#f5faff] border border-[#def0ff] flex flex-col justify-between space-y-3 text-xs">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-bold text-red-700 text-[10px] bg-[#FDECEC] px-2.5 py-0.5 rounded-full">
+                    Job Readiness (Unmet Need)
+                  </span>
+                  <span className="text-[10px] text-[#D64545] font-bold">34.7% Negative</span>
+                </div>
+                <h3 className="font-extrabold text-[#001e2d] text-sm">HR Interview Behavioral Confidence</h3>
+                <p className="text-[#3f4852] text-xs leading-relaxed mt-1 font-medium">
+                  Candidates clear technical tests but struggle in STAR-format HR rounds. Launch interview clinics and mock preparation posts.
+                </p>
               </div>
-              <h3 className="font-bold text-[#252525] text-xs">
-                HR Round Behavioral Confidence Deficit
-              </h3>
-              <p className="text-[#666666] leading-relaxed text-[11px]">
-                Technical test clearing is high, but first-time job seekers report severe rejection in STAR-format HR discussions due to lack of mock interview exposure.
-              </p>
-              <div className="pt-2 border-t border-[#E5E7EB] flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-[#0067A5]">Recommended Action:</span>
-                <Link href="/studio?opportunity=opp_01" className="text-[#0067A5] font-bold hover:underline">
-                  Launch Clinic CTA &rarr;
+              <div className="pt-2 border-t border-[#def0ff] flex items-center justify-between">
+                <Link
+                  href="/trends/employability-and-job-readiness"
+                  className="text-xs text-[#3f4852] hover:text-[#0099f2] font-semibold"
+                >
+                  View trend &rarr;
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => router.push("/studio?topic=Employability%20and%20job%20readiness")}
+                  className="stitch-btn-primary !px-3 !py-1 !text-[11px] flex items-center gap-1 cursor-pointer"
+                >
+                  <span>Use in Studio</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Section 5: Question Themes & Cross-Channel Engagement Patterns */}
+        {/* SECTION: Audience Questions & Channel Timing */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Question Themes */}
-          <div className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-3">
-            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-              <HelpCircle className="w-4 h-4 text-[#0067A5]" />
-              Top Audience Question Themes
+          <div className="stitch-card p-6 space-y-4">
+            <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+              <HelpCircle className="w-4 h-4 text-[#0099f2]" />
+              Frequently Asked Questions from Learners
             </h2>
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
               {[
                 {
                   theme: "STAR behavioral interview preparation for first-time job seekers",
-                  topic: "Employability and job readiness",
                   count: 48,
                   sample: "How do freshers answer 'tell me about a time you failed' in campus interviews?",
                 },
                 {
                   theme: "Generative AI tools roadmap for non-technical retail/hospitality roles",
-                  topic: "AI and digital skills",
                   count: 36,
                   sample: "Which AI tools are actually demanded for B.Com freshers in office operations?",
                 },
                 {
                   theme: "Vocational solar PV & EV center admissions and scholarship criteria",
-                  topic: "Vocational training",
                   count: 29,
                   sample: "Where do students enroll for Tata STRIVE free solar technician courses?",
                 },
               ].map((q, idx) => (
-                <div key={idx} className="p-3 rounded-lg bg-[#F5F7F9] border border-[#E5E7EB] space-y-1">
+                <div key={idx} className="p-3.5 rounded-xl bg-[#f5faff] border border-[#def0ff] space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-[#252525]">{q.theme}</span>
-                    <span className="text-[10px] font-bold text-[#0067A5] bg-white px-2 py-0.5 rounded border">
+                    <span className="font-bold text-[#001e2d]">{q.theme}</span>
+                    <span className="text-[10px] font-bold text-[#00629e] bg-white px-2.5 py-0.5 rounded-full border border-[#def0ff]">
                       {q.count} queries
                     </span>
                   </div>
-                  <p className="text-[11px] text-[#666666] italic bg-white p-2 rounded border border-[#E5E7EB]">
-                    &quot;{q.sample}&quot;
+                  <p className="text-xs text-[#3f4852] italic bg-white p-2.5 rounded-lg border border-[#def0ff]">
+                    &ldquo;{q.sample}&rdquo;
                   </p>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Time-of-Day Engagement */}
-          <div className="bg-white rounded-xl p-5 border border-[#E5E7EB] shadow-xs space-y-3">
-            <h2 className="text-sm font-bold text-[#252525] flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-[#0067A5]" />
-              Audience Engagement by Time of Day (IST)
-            </h2>
-            <p className="text-xs text-[#666666]">
-              Average engagement per post across time intervals. Peak engagement occurs between 6 PM - 8 PM IST.
-            </p>
+          <div className="stitch-card p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-extrabold text-[#001e2d] flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-[#0099f2]" />
+                Audience Engagement by Time of Day (IST)
+              </h2>
+              <p className="text-xs text-[#3f4852] font-medium mt-0.5">
+                Hourly engagement density across social channels. Peak interaction occurs between 6 PM – 8 PM IST.
+              </p>
+            </div>
             <div className="h-56 w-full pt-1">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
@@ -894,10 +1284,18 @@ function TrendsContent() {
                   ]}
                   margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                 >
-                  <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 9, fill: "#666666" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #E5E7EB", fontSize: "11px" }} />
-                  <Bar dataKey="eng" name="Avg Engagement" fill="#0067A5" radius={[4, 4, 0, 0]} />
+                  <XAxis dataKey="hour" tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "#3f4852", fontWeight: 600 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#173343",
+                      borderRadius: "12px",
+                      border: "1px solid #0099f2",
+                      fontSize: "11px",
+                      color: "#ffffff",
+                    }}
+                  />
+                  <Bar dataKey="eng" name="Avg Engagement" fill="#0099f2" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

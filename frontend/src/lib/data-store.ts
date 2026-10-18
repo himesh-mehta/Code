@@ -29,7 +29,7 @@ export { INITIAL_POSTS };
 
 
 const SETTINGS_KEY = "social_pulse_settings";
-const POSTS_STORAGE_KEY = "social_pulse_posts_v12_strict_5";
+const POSTS_STORAGE_KEY = "social_pulse_posts_v13_live_only";
 
 export const ALLOWED_PLATFORMS = new Set<Platform>([
   "youtube",
@@ -89,26 +89,22 @@ export class DataStore {
         localStorage.removeItem("social_pulse_posts");
       } catch {}
 
-      // Load posts - strictly authentic 5 platforms only
+      // Load posts — live data only. No fallback to sample data.
       try {
         const savedPosts = localStorage.getItem(POSTS_STORAGE_KEY);
         if (savedPosts) {
           const parsed = JSON.parse(savedPosts);
-          this.posts = Array.isArray(parsed) && parsed.length >= 70
+          this.posts = Array.isArray(parsed)
             ? parsed.filter((p: Post) => ALLOWED_PLATFORMS.has(p.platform))
-            : [...INITIAL_POSTS];
-          if (this.posts.length === 0) {
-            this.posts = [...INITIAL_POSTS];
-          }
+            : [];
         } else {
-          this.posts = [...INITIAL_POSTS];
-          localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(this.posts));
+          this.posts = [];
         }
       } catch (e) {
-        this.posts = [...INITIAL_POSTS];
+        this.posts = [];
       }
     } else {
-      this.posts = [...INITIAL_POSTS];
+      this.posts = [];
     }
   }
 
@@ -128,7 +124,7 @@ export class DataStore {
   }
 
   public resetToDefault() {
-    this.posts = [...INITIAL_POSTS];
+    this.posts = [];
     if (typeof window !== "undefined") {
       localStorage.setItem(POSTS_STORAGE_KEY, JSON.stringify(this.posts));
     }
@@ -380,23 +376,19 @@ export class DataStore {
     });
 
     const topics: Topic[] = Object.entries(topicMap).map(([name, stats], idx) => {
+      // growth_pct: not derivable without a historical baseline — omit invented values
       return {
         id: `top_${idx + 1}`,
         name,
         post_count: stats.count,
-        growth_pct: name === "Interview preparation" ? 38 : name === "Practical AI skills" ? 31 : name === "Vocational training access" ? 12 : 5,
+        growth_pct: 0, // cannot derive without multi-period baseline
         sentiment_breakdown: {
           positive: stats.pos,
           neutral: stats.neu,
           negative: stats.neg,
         },
-        top_keywords: [name.toLowerCase().split(" ")[0], "freshers", "careers", "tata strive"],
-        trend_series: [
-          { date: "2026-10-06", count: Math.max(1, Math.round(stats.count * 0.2)) },
-          { date: "2026-10-10", count: Math.max(1, Math.round(stats.count * 0.35)) },
-          { date: "2026-10-13", count: Math.max(1, Math.round(stats.count * 0.65)) },
-          { date: "2026-10-16", count: stats.count },
-        ],
+        top_keywords: [name.toLowerCase().split(" ")[0]],
+        trend_series: [], // populated only when real historical time-series is available
         supporting_post_ids: stats.ids,
       };
     }).sort((a, b) => b.post_count - a.post_count);

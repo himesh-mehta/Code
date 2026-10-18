@@ -2,7 +2,7 @@
   "youtube": {
     "source": "youtube",
     "status": "online",
-    "last_sync": "2026-10-17T18:52:01.436398+00:00",
+    "last_sync": "2026-10-17T20:31:06.760043+00:00",
     "records_collected": 15,
     "quota_info": "10,000 units/day quota standard",
     "note": "Successfully queried 15 live videos across Tata STRIVE domains."
@@ -10,7 +10,7 @@
   "gdelt": {
     "source": "gdelt",
     "status": "degraded",
-    "last_sync": "2026-10-17T18:52:12.558727+00:00",
+    "last_sync": "2026-10-17T20:31:23.164642+00:00",
     "records_collected": 0,
     "quota_info": "Public API (no rate limits applied)",
     "note": "GDELT DOC 2.0 service warning: Server disconnected without sending a response."

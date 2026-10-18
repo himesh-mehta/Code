@@ -34,14 +34,41 @@ class TrendForecaster:
         dates: List[str],
         values: List[float],
         horizon: int = 30,
-        target_model: str = "best"
+        target_model: str = "best",
+        real_days_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Chronologically backtests and generates forecasts for topic volume.
         Supports horizons of 30, 60, and 90 days with 80% and 95% prediction intervals.
+        Requires at least 21 real days of historical observations to train Holt-Winters ETS.
         """
         now_iso = datetime.now(timezone.utc).isoformat()
         n = len(values)
+
+        # Enforce minimum 21 real days guardrail: show 'Building history' and NO fake forecast
+        if real_days_count is not None and real_days_count < 21:
+            return {
+                "topic": topic,
+                "target_metric": "daily_mentions",
+                "horizon_days": horizon,
+                "model_name": "Building history (Minimum 21 real days required)",
+                "model_version": self.version,
+                "training_cutoff_date": dates[-1] if dates else "unknown",
+                "forecast_generated_at": now_iso,
+                "evaluation": {
+                    "mae": 0.0,
+                    "rmse": 0.0,
+                    "smape_pct": 0.0,
+                    "baseline_mae": 0.0,
+                    "relative_improvement_pct": 0.0,
+                },
+                "status": "building_history",
+                "real_days_count": real_days_count,
+                "min_required_days": 21,
+                "notes": f"Building history: {real_days_count}/21 real days accumulated. Machine learning forecast will activate automatically once 21 real days are recorded.",
+                "historical_points": [{"date": d, "actual": v} for d, v in zip(dates, values)],
+                "forecast_points": [],
+            }
 
         if n < 14:
             # Insufficient history guardrail

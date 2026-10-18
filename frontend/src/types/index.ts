@@ -115,6 +115,10 @@ export interface Opportunity {
   platforms: Platform[];
   target_audience?: string;
   suggested_cta?: string;
+  is_sample?: boolean;
+  post_count?: number;
+  evidence_posts?: any[];
+  sample_questions?: string[];
 }
 
 export type CampaignTone = "friendly" | "professional" | "inspiring";
@@ -133,6 +137,7 @@ export interface Campaign {
 export interface Overview {
   is_sample: boolean;
   last_updated: string;
+  updated_at?: string;
   total_posts: number;
   relevant_posts: number;
   questions_detected: number;
@@ -144,6 +149,24 @@ export interface Overview {
   top_questions: AudienceQuestion[];
   top_opportunities: Opportunity[];
   recent_posts: Post[];
+  top_impact_cards?: {
+    most_discussed: { topic: string; mentions_7d: number; growth_pct: number; hubs_reporting: string };
+    fastest_growing: { topic: string; new_questions: number; growth_pct: number; subtitle: string };
+    needs_attention: { topic: string; subtitle: string; decline_pct: number; action: string };
+  };
+  learner_voices?: Array<{
+    quote: string;
+    author: string;
+    source: string;
+    topic: string;
+    url: string;
+    likes: number;
+    published_at: string;
+  }>;
+  telemetry_curve?: Array<{
+    date: string;
+    count: number;
+  }>;
 }
 
 export interface AudienceResponse {

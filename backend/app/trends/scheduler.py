@@ -29,14 +29,14 @@ class TrendScheduler:
             logger.info("Social Pulse Daily Trend Scheduler started (Asia/Kolkata timezone).")
 
     def _run_loop(self):
-        """Loop checking daily target execution time (02:00 AM IST = 20:30 UTC)."""
+        """Loop running collection job every 1 hour so history builds continuously."""
         while self._is_running:
             try:
-                # Check every hour or run initial sync if never run
                 if self._last_run is None:
                     self.execute_refresh(trigger="initial_startup")
-
-                time.sleep(3600)  # Check hourly
+                else:
+                    self.execute_refresh(trigger="scheduled_hourly")
+                time.sleep(3600)  # Check and fetch every hour
             except Exception as e:
                 logger.error(f"Scheduler loop encountered error: {e}")
                 time.sleep(60)
