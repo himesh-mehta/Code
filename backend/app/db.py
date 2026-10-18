@@ -109,6 +109,15 @@ def init_db():
         )
     """)
 
+    # 5. App Settings Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
     logger.info(f"Initialized SQLite database at {DB_PATH}")
@@ -433,3 +442,44 @@ def get_report_by_id(report_id: str) -> Optional[Dict[str, Any]]:
     d = dict(row)
     d["metrics_snapshot"] = json.loads(d["metrics_snapshot"] or "{}")
     return d
+
+# --- App Settings Operations ---
+
+def get_setting(key: str, default: Any = None) -> Any:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return default
+    try:
+        return json.loads(row["value"])
+    except Exception:
+        return row["value"]
+
+def set_setting(key: str, value: Any) -> None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    val_str = json.dumps(value) if not isinstance(value, str) else value
+    cursor.execute("""
+        INSERT OR REPLACE INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+    """, (key, val_str, now_iso))
+    conn.commit()
+    conn.close()
+
+def get_all_settings() -> Dict[str, Any]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT key, value FROM app_settings")
+    rows = cursor.fetchall()
+    conn.close()
+    res = {}
+    for r in rows:
+        try:
+            res[r["key"]] = json.loads(r["value"])
+        except Exception:
+            res[r["key"]] = r["value"]
+    return res

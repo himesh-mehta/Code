@@ -167,6 +167,72 @@ export interface Overview {
     date: string;
     count: number;
   }>;
+  last_successful_refresh?: string;
+  last_refresh_attempt?: {
+    timestamp: string;
+    status: string;
+    trigger?: string;
+    error?: string;
+    new_posts?: number;
+  };
+}
+
+export interface OfficialImpactMetric {
+  id: string;
+  name: string;
+  value: number;
+  display_value: string;
+  unit: string;
+  definition: string;
+  reporting_period: string;
+  is_cumulative: boolean;
+  source_url: string;
+  verified_date: string;
+  highlight?: boolean;
+}
+
+export interface OfficialImpactResponse {
+  organization: string;
+  official_website: string;
+  impact_page: string;
+  what_we_do_page: string;
+  last_retrieved: string;
+  status: string;
+  notice: string;
+  cumulative_metrics: OfficialImpactMetric[];
+  annual_outcomes: OfficialImpactMetric[];
+}
+
+export interface AppSettings {
+  account: {
+    display_name: string;
+    email: string;
+    organization: string;
+    role: string;
+    avatar_initials: string;
+    session_status: string;
+    auth_configured: boolean;
+    auth_note: string;
+  };
+  appearance: {
+    theme: string;
+    density: string;
+  };
+  data_collection: {
+    refresh_interval_minutes: number;
+    auto_sync_enabled: boolean;
+    monitored_topics: string[];
+    keywords: string[];
+    sentiment_threshold: number;
+  };
+  ai_analysis: {
+    model_name: string;
+    default_tone: string;
+    default_language: string;
+    strict_factual_grounding: boolean;
+    zero_hallucination_mode: boolean;
+    api_configured: boolean;
+  };
 }
 
 export interface AudienceResponse {

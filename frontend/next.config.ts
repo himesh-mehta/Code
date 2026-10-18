@@ -24,6 +24,22 @@ const nextConfig: NextConfig = {
         destination: "http://127.0.0.1:8000/api/overview",
       },
       {
+        source: "/api/overview/refresh",
+        destination: "http://127.0.0.1:8000/api/overview/refresh",
+      },
+      {
+        source: "/api/official-impact",
+        destination: "http://127.0.0.1:8000/api/official-impact",
+      },
+      {
+        source: "/api/settings",
+        destination: "http://127.0.0.1:8000/api/settings",
+      },
+      {
+        source: "/api/sources/health",
+        destination: "http://127.0.0.1:8000/api/sources/health",
+      },
+      {
         source: "/api/opportunities",
         destination: "http://127.0.0.1:8000/api/opportunities",
       },

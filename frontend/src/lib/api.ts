@@ -11,6 +11,8 @@ import {
   GenerateCampaignRequest,
   ApiSettings,
   GdeltNewsResponse,
+  OfficialImpactResponse,
+  AppSettings,
 } from "../types";
 import { store } from "./data-store";
 import { fetchYouTubePosts } from "./youtube";
@@ -64,6 +66,8 @@ export const api = {
           top_impact_cards: live.top_impact_cards,
           learner_voices: live.learner_voices,
           telemetry_curve: live.telemetry_curve,
+          last_successful_refresh: live.last_successful_refresh || live.updated_at,
+          last_refresh_attempt: live.last_refresh_attempt,
           top_topics: (live.top_topics || []).map((t: any) => ({
             id: t.id || t.name,
             name: t.name || t.topic,
@@ -90,6 +94,76 @@ export const api = {
       },
       learner_voices: SAMPLE_LEARNER_QUOTES as any,
     };
+  },
+
+  refreshOverview: async (payload?: { trigger?: string }): Promise<{
+    status: string;
+    message: string;
+    sources: Record<string, { status: string; count: number; error: string | null }>;
+    new_posts_inserted: number;
+    total_records_processed?: number;
+    last_successful_refresh?: string;
+    last_attempt?: any;
+  }> => {
+    try {
+      const res = await fetch("/api/overview/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || { trigger: "manual_overview_button" }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      return {
+        status: "failed",
+        message: `Backend refresh returned HTTP ${res.status}`,
+        sources: {},
+        new_posts_inserted: 0,
+      };
+    } catch (e: any) {
+      return {
+        status: "failed",
+        message: e?.message || "Network error while triggering refresh",
+        sources: {},
+        new_posts_inserted: 0,
+      };
+    }
+  },
+
+  getOfficialImpact: async (): Promise<OfficialImpactResponse> => {
+    const res = await fetch("/api/official-impact", { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch official impact: ${res.status}`);
+    }
+    return await res.json();
+  },
+
+  getSettings: async (): Promise<{ status: string; settings: AppSettings }> => {
+    const res = await fetch("/api/settings", { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch settings: ${res.status}`);
+    }
+    return await res.json();
+  },
+
+  saveSettings: async (settings: Partial<AppSettings>): Promise<{ status: string; message: string }> => {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to save settings: ${res.status}`);
+    }
+    return await res.json();
+  },
+
+  getSourcesHealth: async (): Promise<{ status: string; integrations: any[]; last_successful_refresh?: string }> => {
+    const res = await fetch("/api/sources/health", { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch sources health: ${res.status}`);
+    }
+    return await res.json();
   },
 
   getPosts: async (query?: PostsQuery): Promise<PostsResponse> => {
@@ -672,11 +746,11 @@ export const api = {
     return store.addCommentToPost(postId, comment);
   },
 
-  getSettings: (): ApiSettings => {
+  getLocalStoreSettings: (): ApiSettings => {
     return store.getSettings();
   },
 
-  saveSettings: (settings: Partial<ApiSettings>) => {
+  saveLocalStoreSettings: (settings: Partial<ApiSettings>) => {
     store.saveSettings(settings);
   },
 
