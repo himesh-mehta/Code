@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="statsmodels")
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 logger = logging.getLogger("pulse_forecasting")
@@ -47,12 +49,13 @@ class TrendForecaster:
 
         # Enforce minimum 21 real days guardrail: show 'Building history' and NO fake forecast
         actual_real_days = real_days_count if real_days_count is not None else n
-        if actual_real_days < 21 or n < 21:
+        min_required_days = 21
+        if actual_real_days < min_required_days or n < min_required_days:
             return {
                 "topic": topic,
                 "target_metric": "daily_mentions",
                 "horizon_days": horizon,
-                "model_name": "Building history (Minimum 21 real days required)",
+                "model_name": f"Building history (Minimum {min_required_days} real days required)",
                 "model_version": self.version,
                 "training_cutoff_date": dates[-1] if dates else "unknown",
                 "forecast_generated_at": now_iso,
@@ -65,8 +68,8 @@ class TrendForecaster:
                 },
                 "status": "building_history",
                 "real_days_count": actual_real_days,
-                "min_required_days": 21,
-                "notes": f"Building history: {actual_real_days}/21 real days accumulated. Machine learning forecast will activate automatically once 21 real days are recorded.",
+                "min_required_days": min_required_days,
+                "notes": f"Building history: {actual_real_days}/{min_required_days} real days accumulated. Machine learning forecast will activate automatically once {min_required_days} real days are recorded.",
                 "historical_points": [{"date": d, "actual": v} for d, v in zip(dates, values)],
                 "forecast_points": [],
             }
@@ -76,7 +79,7 @@ class TrendForecaster:
         is_sparse = (non_zeros / n) < 0.35
 
         # 1. Chronological Train/Test Split for Backtesting
-        test_size = min(14, max(7, int(n * 0.2)))
+        test_size = min(3, max(2, int(n * 0.25))) if n < 14 else (min(7, max(3, int(n * 0.25))) if n < 30 else min(14, max(7, int(n * 0.2))))
         train_vals = np.array(values[:-test_size], dtype=float)
         test_vals = np.array(values[-test_size:], dtype=float)
 
@@ -84,9 +87,11 @@ class TrendForecaster:
         baseline_preds = []
         train_drift = (train_vals[-1] - train_vals[0]) / max(1, len(train_vals))
         for step in range(test_size):
-            # Look back 7 days if available
-            lookback_idx = len(train_vals) - 7 + (step % 7)
-            val = train_vals[lookback_idx] if lookback_idx >= 0 else train_vals[-1]
+            if len(train_vals) >= 7:
+                lookback_idx = len(train_vals) - 7 + (step % 7)
+            else:
+                lookback_idx = step % len(train_vals)
+            val = train_vals[lookback_idx] if 0 <= lookback_idx < len(train_vals) else train_vals[-1]
             baseline_preds.append(max(0.0, val + (step + 1) * train_drift))
         baseline_preds = np.array(baseline_preds)
         baseline_mae = calculate_mae(test_vals, baseline_preds)

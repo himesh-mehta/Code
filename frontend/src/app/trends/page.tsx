@@ -441,7 +441,7 @@ function TrendsContent() {
         )}
 
         {/* Top Insight Summary Cards (Computed in Code, Grounded in Real Evidence) */}
-        <section className={`grid grid-cols-1 ${biggestRiseCard?.has_leader ? "md:grid-cols-3" : "md:grid-cols-2"} gap-6`}>
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Card 1: Most Discussed */}
           {mostDiscussedCard && (
             <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
@@ -679,8 +679,8 @@ function TrendsContent() {
             </div>
           )}
 
-          {/* Card 3: Biggest Expected Rise (Shown ONLY when >= 21 real days exist) */}
-          {biggestRiseCard?.has_leader && (
+          {/* Card 3: Biggest Expected Rise */}
+          {biggestRiseCard?.has_leader ? (
             <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden group">
               <div className="relative z-10 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
@@ -794,6 +794,34 @@ function TrendsContent() {
                 )}
               </div>
             </div>
+          ) : (
+            <div className="stitch-card p-6 flex flex-col justify-between relative overflow-hidden bg-gradient-to-b from-[#f9fcff] to-[#f0f7ff] border border-dashed border-[#bce0fd]">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[#3f4852] uppercase tracking-wider font-bold">
+                    Biggest Expected Rise
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                    Building history
+                  </span>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-[#001e2d] leading-snug">
+                    Model training in progress
+                  </h2>
+                  <p className="text-xs text-[#3f4852] mt-1.5 leading-relaxed font-medium">
+                    Holt-Winters ETS model strictly trains on real recorded observations (minimum 21 real days required). Real daily metrics are accumulating.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-[#def0ff] flex items-center justify-between text-xs text-[#00629e]">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <TrendingUp className="w-4 h-4 text-[#0099f2]" />
+                  <span>Forward Trajectory</span>
+                </div>
+                <span className="text-[11px] text-[#3f4852] font-semibold">21-Day ETS Guardrail</span>
+              </div>
+            </div>
           )}
         </section>
 
@@ -899,7 +927,7 @@ function TrendsContent() {
             {(forecastResult as any)?.status === "building_history" && (
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold">
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                <span>Building history: {(forecastResult as any)?.real_days_count || 3}/21 real days recorded (solid line) — forecast activates at 21 days</span>
+                <span>Building history: {(forecastResult as any)?.real_days_count || 3}/{(forecastResult as any)?.min_required_days || 14} real days recorded (solid line) — forecast activates at {(forecastResult as any)?.min_required_days || 14} days</span>
               </div>
             )}
           </div>

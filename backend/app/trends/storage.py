@@ -396,19 +396,24 @@ class TrendStorage:
                 "programmes": md_item["matching_programmes"],
             }
 
-        # 2. Fastest Growing: highest % change vs previous 7 days, min 20 mentions in current period
-        eligible_for_growth = [t for t in summary if t["current_weekly_mentions"] >= 20]
-        if not eligible_for_growth:
-            # Fallback to any topic with mentions > 0
-            eligible_for_growth = [t for t in summary if t["current_weekly_mentions"] > 0]
+        # 2. Fastest Growing: highest % change vs previous 7 days, prioritizing topics distinct from Most Discussed
+        distinct_from_md = [t for t in summary if md_item is None or t["topic"] != md_item["topic"]]
+        # Primary filter: distinct topics with at least 3 current mentions and positive growth
+        growth_candidates = [
+            t for t in distinct_from_md
+            if t["current_weekly_mentions"] >= 3 and (t.get("growth_pct") is not None and t["growth_pct"] > 0)
+        ]
+        if not growth_candidates:
+            growth_candidates = [t for t in distinct_from_md if t["current_weekly_mentions"] > 0]
+        if not growth_candidates:
+            growth_candidates = distinct_from_md or summary
 
         sorted_by_growth = sorted(
-            eligible_for_growth,
+            growth_candidates,
             key=lambda x: (x["growth_pct"] if not x.get("is_new") else 999.0),
             reverse=True
         )
-        other_growth = [t for t in sorted_by_growth if md_item is None or t["topic"] != md_item["topic"]]
-        fg_item = other_growth[0] if other_growth else (sorted_by_growth[0] if sorted_by_growth else md_item)
+        fg_item = sorted_by_growth[0] if sorted_by_growth else md_item
 
         fastest_growing = None
         if fg_item:
@@ -428,36 +433,50 @@ class TrendStorage:
                 "programmes": fg_item["matching_programmes"],
             }
 
-        # 3. Biggest Expected Rise: Holt-Winters model on REAL daily counts (>= 21 real days required)
-        # If any topic has >= 21 real days, fit forecast and find highest % increase
+        # 3. Biggest Expected Rise: Holt-Winters model on REAL daily counts (>= 14 real days required)
+        # Prioritizes topics DISTINCT from Most Discussed and Fastest Growing
         biggest_rise = None
         best_forecast_topic = None
         best_forecast_pct = -999.0
         best_forecast_item = None
 
-        for item in summary:
-            if item.get("real_days_count", 0) >= 21:
-                series = self.get_topic_series(item["topic"], days=90)
-                real_series = [o for o in series if not o.is_simulated]
-                if len(real_series) >= 21:
-                    dates = [o.date for o in real_series]
-                    values = [float(o.mentions) for o in real_series]
-                    fc_res = forecaster.fit_and_forecast(
-                        topic=item["topic"],
-                        dates=dates,
-                        values=values,
-                        horizon=30,
-                        target_model="best",
-                        real_days_count=len(real_series),
-                    )
-                    if fc_res.get("status") == "trained" and fc_res.get("forecast_points"):
-                        pred_end = fc_res["forecast_points"][-1]["predicted"]
-                        actual_now = values[-1] if values else 1.0
-                        fc_growth = round(((pred_end - actual_now) / max(1.0, actual_now)) * 100, 1)
-                        if fc_growth > best_forecast_pct:
-                            best_forecast_pct = fc_growth
-                            best_forecast_topic = item["topic"]
-                            best_forecast_item = item
+        used_topics = set()
+        if md_item:
+            used_topics.add(md_item["topic"])
+        if fg_item:
+            used_topics.add(fg_item["topic"])
+
+        # First pass: try candidates distinct from the first two cards
+        candidate_items = [t for t in summary if t["topic"] not in used_topics and t.get("real_days_count", 0) >= 7]
+        if not candidate_items:
+            # Fallback to any topic with >= 7 real days not matching md_item
+            candidate_items = [t for t in summary if (md_item is None or t["topic"] != md_item["topic"]) and t.get("real_days_count", 0) >= 7]
+        if not candidate_items:
+            # Final fallback: any topic with >= 7 real days
+            candidate_items = [t for t in summary if t.get("real_days_count", 0) >= 7]
+
+        for item in candidate_items:
+            series = self.get_topic_series(item["topic"], days=90)
+            real_series = [o for o in series if not o.is_simulated]
+            if len(real_series) >= 7:
+                dates = [o.date for o in real_series]
+                values = [float(o.mentions) for o in real_series]
+                fc_res = forecaster.fit_and_forecast(
+                    topic=item["topic"],
+                    dates=dates,
+                    values=values,
+                    horizon=30,
+                    target_model="best",
+                    real_days_count=len(real_series),
+                )
+                if fc_res.get("status") == "trained" and fc_res.get("forecast_points"):
+                    pred_end = fc_res["forecast_points"][-1]["predicted"]
+                    actual_now = values[-1] if values else 1.0
+                    fc_growth = round(((pred_end - actual_now) / max(1.0, actual_now)) * 100, 1)
+                    if fc_growth > best_forecast_pct:
+                        best_forecast_pct = fc_growth
+                        best_forecast_topic = item["topic"]
+                        best_forecast_item = item
 
         if best_forecast_topic and best_forecast_item:
             biggest_rise = {
@@ -471,12 +490,12 @@ class TrendStorage:
                 "programmes": best_forecast_item["matching_programmes"],
             }
         else:
-            # Under 21 real days: explicit 'Building history' state and card should be hidden
+            # Under 7 real days: explicit 'Building history' state
             biggest_rise = {
                 "has_leader": False,
                 "topic": None,
                 "status": "building_history",
-                "notes": "Building history: requires at least 21 real days of recorded data to train Holt-Winters ETS.",
+                "notes": "Building history: requires at least 7 real days of recorded data to train Holt-Winters ETS.",
             }
 
         return {
