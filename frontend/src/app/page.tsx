@@ -4,7 +4,6 @@ import React, { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
-import { FilterBar } from "@/components/FilterBar";
 import { api } from "@/lib/api";
 import { Overview, PostsQuery, OfficialImpactResponse, AppSettings } from "@/types";
 import {
@@ -40,7 +39,7 @@ function OverviewContent() {
   const router = useRouter();
   const { updatePageContext } = usePageContext();
 
-  const [filters, setFilters] = useState<PostsQuery>({
+  const [filters] = useState<PostsQuery>({
     date_range: "30d",
   });
 
@@ -339,13 +338,6 @@ function OverviewContent() {
             </button>
           </div>
         </section>
-
-        {/* Global Filter Bar */}
-        <FilterBar
-          filters={filters}
-          onChange={setFilters}
-          totalResults={data.total_posts}
-        />
 
         {/* ========================================================================= */}
         {/* SECTION 1: TATA STRIVE OFFICIAL ORGANIZATIONAL IMPACT (VERIFIED BENCHMARKS) */}
