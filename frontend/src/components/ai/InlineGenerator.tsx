@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   X,
@@ -87,7 +88,13 @@ export function InlineGenerator({ isOpen, onClose, data }: InlineGeneratorProps)
     }
   }, [data]);
 
-  if (!isOpen || !data) return null;
+  const [mounted, setMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!isOpen || !data || !mounted) return null;
 
   // Construct verified real context data only
   const buildContextPayload = () => {
@@ -189,13 +196,13 @@ export function InlineGenerator({ isOpen, onClose, data }: InlineGeneratorProps)
     }
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 overflow-hidden bg-[#001e2d]/60 backdrop-blur-xs flex justify-end animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] overflow-hidden bg-[#001e2d]/60 backdrop-blur-xs flex justify-end animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-xl bg-white h-full shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300"
+        className="relative w-full max-w-xl bg-white h-screen shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Strip */}
@@ -544,6 +551,7 @@ export function InlineGenerator({ isOpen, onClose, data }: InlineGeneratorProps)
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

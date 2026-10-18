@@ -26,6 +26,7 @@ from .trends.collector import (
 )
 from .impact_service import get_official_impact
 from .studio_service import get_studio_evidence_pack, get_studio_suggestions
+from .audience_service import compute_audience_intelligence
 from .db import (
     get_db_connection,
     get_posts,
@@ -710,114 +711,14 @@ def get_opportunities_endpoint():
 @router.get("/audience")
 def get_audience_endpoint():
     """
-    Computes audience outreach intelligence:
-    - Real count of stored questions in last 30 days
-    - Real sources actually collected from
-    - Categorized FAQs with real question counts & AI suggested replies
-    - Real Best Time to Post (published_at converted to IST)
+    Computes authentic Tata STRIVE audience outreach intelligence:
+    - Real count of stored & verified learner questions
+    - Authentic Tata STRIVE offline training centres network (TSSDC & TSEC)
+    - Tactical outreach initiatives linked to physical centres and real learner inquiries
+    - Clean categorized FAQs with verified learner questions and institutional replies
+    - Real Best Time to Post (published_at converted to IST UTC+5:30)
     """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    total_posts = get_total_posts_count()
-    is_sample_needed = total_posts < MIN_POSTS_THRESHOLD
-
-    # Real questions count in last 30 days
-    cursor.execute("""
-        SELECT COUNT(*) FROM posts
-        WHERE is_question = 1 AND published_at >= date('now', '-30 days')
-    """)
-    real_questions_count = cursor.fetchone()[0]
-
-    # Real sources actually collected from
-    cursor.execute("SELECT DISTINCT source FROM posts WHERE source IS NOT NULL")
-    collected_sources = [r[0] for r in cursor.fetchall()]
-    if not collected_sources:
-        collected_sources = ["youtube", "google_news", "bluesky"]
-
-    # Categorized FAQs grouped by topic
-    cursor.execute("""
-        SELECT 
-            topic_id,
-            topic_name,
-            COUNT(*) as q_count,
-            MIN(text) as sample_q
-        FROM posts
-        WHERE is_question = 1
-        GROUP BY topic_id
-        HAVING q_count > 0
-        ORDER BY q_count DESC
-        LIMIT 4
-    """)
-    faq_rows = cursor.fetchall()
-    categorized_faqs = []
-
-    for r in faq_rows:
-        t_name = r["topic_name"]
-        sample_q = r["sample_q"]
-        suggested_reply = (
-            f"Tata STRIVE provides industry-aligned certifications in {t_name} with dedicated lab training "
-            f"and campus placement drives across accredited enterprise partners."
-        )
-        categorized_faqs.append({
-            "id": f"faq_{r['topic_id']}",
-            "topic": t_name,
-            "topic_id": r["topic_id"],
-            "count": r["q_count"],
-            "sample_question": sample_q[:140],
-            "suggested_reply": suggested_reply,
-            "reply_label": "AI suggested reply",
-        })
-
-    # Best Time to Post (Hour converted to IST: UTC+5:30)
-    # SQLite strftime('%H') on UTC, add 5.5 hours
-    cursor.execute("""
-        SELECT 
-            strftime('%H', published_at) as utc_hour,
-            COUNT(*) as post_cnt,
-            SUM(likes + comments) as eng
-        FROM posts
-        WHERE published_at IS NOT NULL
-        GROUP BY utc_hour
-        ORDER BY utc_hour ASC
-    """)
-    hour_rows = cursor.fetchall()
-
-    hourly_ist: Dict[int, int] = {h: 0 for h in range(24)}
-    for hr in hour_rows:
-        if hr["utc_hour"] is not None:
-            utc_h = int(hr["utc_hour"])
-            ist_h = (utc_h + 5) % 24  # UTC+5:30 approximate hour
-            score = (hr["post_cnt"] * 10) + (hr["eng"] or 0)
-            hourly_ist[ist_h] += score
-
-    max_score = max(1, max(hourly_ist.values()))
-    best_time_to_post = []
-    display_hours = [8, 10, 12, 14, 17, 19, 21]
-    for h in display_hours:
-        raw_val = hourly_ist.get(h, 0)
-        norm_score = min(100, max(20, int((raw_val / max_score) * 100))) if max_score > 0 else 60
-        best_time_to_post.append({
-            "hour": f"{h:02d}:00",
-            "label": f"{h%12 or 12} {'AM' if h < 12 else 'PM'}",
-            "score": norm_score,
-            "peak": norm_score >= 85,
-        })
-
-    conn.close()
-
-    return {
-        "status": "success",
-        "is_sample": is_sample_needed,
-        "learner_questions_digest": {
-            "total_questions": real_questions_count if real_questions_count > 0 else (18 if is_sample_needed else 0),
-            "sources_used": collected_sources,
-            "period": "Last 30 days",
-        },
-        "categorized_faqs": categorized_faqs,
-        "best_time_to_post": best_time_to_post,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    return compute_audience_intelligence()
 
 # --- 6. /api/reports ---
 

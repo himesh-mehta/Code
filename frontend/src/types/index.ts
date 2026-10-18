@@ -365,4 +365,68 @@ export interface StudioSuggestionsResponse {
   }>;
 }
 
+export interface OfflineCentre {
+  id: string;
+  name: string;
+  short_name: string;
+  city: string;
+  state: string;
+  zone: string;
+  type: "Flagship TSSDC" | "Domain TSEC";
+  address: string;
+  key_domains: string[];
+  specialized_labs: string[];
+  corporate_partners: string[];
+  annual_capacity: number;
+  placement_rate: string;
+  contact_email: string;
+  primary_topic: string;
+  description: string;
+}
+
+export interface OutreachInitiative {
+  id: string;
+  title: string;
+  description: string;
+  target_cohort: string;
+  tag: string;
+  icon: string;
+  topic: string;
+  centre_name: string;
+  centre_location: string;
+  action_cta: string;
+}
+
+export interface CategorizedFaq {
+  id: string;
+  topic: string;
+  topic_id?: string;
+  count: number;
+  sample_question: string;
+  suggested_reply: string;
+  reply_label?: string;
+  centre_connection?: string;
+}
+
+export interface RealAudienceResponse {
+  status: string;
+  is_sample: boolean;
+  learner_questions_digest: {
+    total_questions: number;
+    sources_used: string[];
+    period: string;
+  };
+  offline_centres: OfflineCentre[];
+  outreach_initiatives: OutreachInitiative[];
+  categorized_faqs: CategorizedFaq[];
+  best_time_to_post: Array<{
+    hour: string;
+    label: string;
+    score: number;
+    peak: boolean;
+  }>;
+  updated_at: string;
+}
+
+
 
