@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Social Pulse — Frontend Application (Next.js 16 + TypeScript)
 
-## Getting Started
+Production web dashboard for **Social Pulse Intelligence** (Tata STRIVE), built with Next.js 16 (App Router with Turbopack), Tailwind CSS, and Recharts.
 
-First, run the development server:
+---
 
+## ⚡ Quickstart
+
+### 1. Prerequisites
+- **Node.js**: v18.18+ or v20+ recommended
+- **npm**: v9+ (or pnpm / yarn)
+
+### 2. Install Dependencies
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd frontend
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Environment Variables
+Copy the example environment template:
+```bash
+cp .env.example .env.local
+```
+*(Optional)* Add your API keys inside `.env.local`:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_YOUTUBE_API_KEY=your_youtube_key
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Start the Development Server
+```bash
+npm run dev
+```
+Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 5. Build for Production
+To verify TypeScript types and generate the optimized production bundle:
+```bash
+npm run build
+npm run start
+```
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 🧭 Page Architecture & Routes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Route | Page File | Purpose |
+| :--- | :--- | :--- |
+| **`/`** | `src/app/page.tsx` | Executive Overview with top impact cards, learner voice quotes, and volume curve. |
+| **`/feed`** | `src/app/feed/page.tsx` | Omni-channel listening stream with 5 live connectors, RoBERTa drawer, and CSV upload. |
+| **`/trends`** | `src/app/trends/page.tsx` | Trend intelligence, Holt-Winters ETS forecast curve, and emerging vocational skills. |
+| **`/opportunities`**| `src/app/opportunities/page.tsx` | Interactive Opportunity Map (Bubble Chart), 5-factor scoring, and 30-day momentum. |
+| **`/studio`** | `src/app/studio/page.tsx` | AI Campaign Studio generating grounded LinkedIn, Instagram, and WhatsApp copy. |
+| **`/audience`** | `src/app/audience/page.tsx` | Learner inquiries, authentic Tata STRIVE skill centres, and best time to post (IST). |
+| **`/reports`** | `src/app/reports/page.tsx` | On-demand intelligence CSV report generator and direct file download. |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 🎨 Theme & Design System
+- **Primary Brand**: Tata STRIVE Deep Azure (`#00629e` / `#001e2d`) & Vibrant Lime (`#ebf875` / `#d4e838`).
+- **Interactive States**: Smooth micro-transitions, accessible focus rings, and high contrast typography (Geist Sans).
+- **Responsive Layout**: Collapsible sidebar, mobile drawer support, and responsive chart containers.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🔄 API Reverse Proxy
+All frontend API calls to `/api/topics`, `/api/overview`, `/api/opportunities`, `/api/audience`, `/api/reports`, `/api/assistant`, and `/api/sentiment` are automatically reverse-proxied to FastAPI (`http://localhost:8000`) via `next.config.ts`, eliminating CORS errors.
